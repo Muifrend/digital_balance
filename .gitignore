@@ -41,3 +41,5 @@ npm-debug.log*
 # Database (local user data, shouldn't be in repo)
 *.db
 *.sqlite
+
+tasks/

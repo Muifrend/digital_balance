@@ -1,7 +1,173 @@
 import { app, shell, BrowserWindow, ipcMain } from 'electron'
-import { join } from 'path'
+import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
+import { dirname, join } from 'path'
+import { existsSync } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
+
+const ACTIVITYWATCH_PORT = 5600
+const ACTIVITYWATCH_INFO_URL = `http://127.0.0.1:${ACTIVITYWATCH_PORT}/api/0/info`
+const ACTIVITYWATCH_STARTUP_TIMEOUT_MS = 20_000
+const ACTIVITYWATCH_POLL_INTERVAL_MS = 500
+
+let awServerProcess: ChildProcessWithoutNullStreams | null = null
+let awWatcherWindowProcess: ChildProcessWithoutNullStreams | null = null
+
+function getActivityWatchPlatform(): string {
+  if (process.platform === 'darwin') return 'macos'
+  if (process.platform === 'win32') return 'windows'
+  return 'linux'
+}
+
+function resolveActivityWatchRoot(): string {
+  const platformDir = getActivityWatchPlatform()
+  const candidates = [
+    join(process.resourcesPath, 'activitywatch', platformDir),
+    join(process.resourcesPath, 'app.asar.unpacked', 'resources', 'activitywatch', platformDir),
+    join(app.getAppPath(), 'resources', 'activitywatch', platformDir),
+    join(app.getAppPath(), '..', 'resources', 'activitywatch', platformDir),
+    join(__dirname, '../../resources/activitywatch', platformDir)
+  ]
+
+  const resolved = candidates.find((candidate) => existsSync(candidate))
+  if (!resolved) {
+    throw new Error(`ActivityWatch binaries not found. Checked: ${candidates.join(', ')}`)
+  }
+
+  return resolved
+}
+
+function resolveBinaryPath(baseDir: string, binaryFolder: string, binaryName: string): string {
+  const executableName = process.platform === 'win32' ? `${binaryName}.exe` : binaryName
+  return join(baseDir, binaryFolder, executableName)
+}
+
+function buildActivityWatchEnv(baseDir: string, binaryDir: string): NodeJS.ProcessEnv {
+  const env = { ...process.env }
+  const separator = process.platform === 'win32' ? ';' : ':'
+  const libraryPaths = [baseDir, binaryDir]
+
+  if (process.platform === 'linux') {
+    env.LD_LIBRARY_PATH = [libraryPaths.join(separator), process.env.LD_LIBRARY_PATH]
+      .filter(Boolean)
+      .join(separator)
+  }
+
+  if (process.platform === 'darwin') {
+    env.DYLD_LIBRARY_PATH = [libraryPaths.join(separator), process.env.DYLD_LIBRARY_PATH]
+      .filter(Boolean)
+      .join(separator)
+  }
+
+  return env
+}
+
+function attachProcessLogging(
+  label: string,
+  childProcess: ChildProcessWithoutNullStreams
+): ChildProcessWithoutNullStreams {
+  childProcess.stdout.on('data', (chunk) => {
+    const output = chunk.toString().trim()
+    if (output) console.log(`[${label}] ${output}`)
+  })
+
+  childProcess.stderr.on('data', (chunk) => {
+    const output = chunk.toString().trim()
+    if (output) console.error(`[${label}] ${output}`)
+  })
+
+  childProcess.on('error', (error) => {
+    console.error(`[${label}] failed to start:`, error)
+  })
+
+  childProcess.on('exit', (code, signal) => {
+    console.log(`[${label}] exited with code ${code ?? 'null'} signal ${signal ?? 'null'}`)
+  })
+
+  return childProcess
+}
+
+async function isActivityWatchServerHealthy(timeoutMs = 1_000): Promise<boolean> {
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+
+  try {
+    const response = await fetch(ACTIVITYWATCH_INFO_URL, { signal: controller.signal })
+    return response.ok
+  } catch {
+    return false
+  } finally {
+    clearTimeout(timeoutId)
+  }
+}
+
+async function waitForActivityWatchServerReady(): Promise<void> {
+  const deadline = Date.now() + ACTIVITYWATCH_STARTUP_TIMEOUT_MS
+
+  while (Date.now() < deadline) {
+    if (await isActivityWatchServerHealthy()) {
+      return
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, ACTIVITYWATCH_POLL_INTERVAL_MS))
+  }
+
+  throw new Error(
+    `Timed out waiting for ActivityWatch server at ${ACTIVITYWATCH_INFO_URL} after ${ACTIVITYWATCH_STARTUP_TIMEOUT_MS}ms`
+  )
+}
+
+async function startActivityWatch(): Promise<void> {
+  const activityWatchRoot = resolveActivityWatchRoot()
+  const awServerBinary = resolveBinaryPath(activityWatchRoot, 'aw-server', 'aw-server')
+  const awWatcherWindowBinary = resolveBinaryPath(
+    activityWatchRoot,
+    'aw-watcher-window',
+    'aw-watcher-window'
+  )
+
+  if (!(await isActivityWatchServerHealthy())) {
+    if (!existsSync(awServerBinary)) {
+      throw new Error(`ActivityWatch server binary not found at ${awServerBinary}`)
+    }
+
+    const awServerDir = dirname(awServerBinary)
+    awServerProcess = attachProcessLogging(
+      'aw-server',
+      spawn(awServerBinary, [], {
+        cwd: awServerDir,
+        env: buildActivityWatchEnv(activityWatchRoot, awServerDir),
+        stdio: 'pipe'
+      })
+    )
+
+    await waitForActivityWatchServerReady()
+  } else {
+    console.log('[aw-server] already running, skipping launch')
+  }
+
+  if (!existsSync(awWatcherWindowBinary)) {
+    throw new Error(`ActivityWatch watcher binary not found at ${awWatcherWindowBinary}`)
+  }
+
+  const awWatcherWindowDir = dirname(awWatcherWindowBinary)
+  awWatcherWindowProcess = attachProcessLogging(
+    'aw-watcher-window',
+    spawn(awWatcherWindowBinary, [], {
+      cwd: awWatcherWindowDir,
+      env: buildActivityWatchEnv(activityWatchRoot, awWatcherWindowDir),
+      stdio: 'pipe'
+    })
+  )
+}
+
+function stopActivityWatchProcesses(): void {
+  for (const processToStop of [awWatcherWindowProcess, awServerProcess]) {
+    if (processToStop && processToStop.exitCode === null && !processToStop.killed) {
+      processToStop.kill('SIGTERM')
+    }
+  }
+}
 
 function createWindow(): void {
   // Create the browser window.
@@ -52,6 +218,10 @@ app.whenReady().then(() => {
   // IPC test
   ipcMain.on('ping', () => console.log('pong'))
 
+  startActivityWatch().catch((error) => {
+    console.error('Failed to start ActivityWatch services:', error)
+  })
+
   createWindow()
 
   app.on('activate', function () {
@@ -68,6 +238,10 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit()
   }
+})
+
+app.on('before-quit', () => {
+  stopActivityWatchProcesses()
 })
 
 // In this file you can include the rest of your app's specific main process
