@@ -1,6 +1,43 @@
-node_modules
-dist
-out
-.DS_Store
+# Node
+node_modules/
+out/
+dist/
 .eslintcache
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# ActivityWatch binaries (too large for git, download per platform)
+resources/activitywatch/
+
+# Electron build outputs
+build/
+*.dmg
+*.exe
+*.AppImage
+*.zip
+
+# Environment
+.env
+.env.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
 *.log*
+npm-debug.log*
+
+# Database (local user data, shouldn't be in repo)
+*.db
+*.sqlite
