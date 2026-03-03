@@ -6,12 +6,32 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 
 const ACTIVITYWATCH_PORT = 5600
+const ACTIVITYWATCH_BASE_URL = `http://127.0.0.1:${ACTIVITYWATCH_PORT}`
 const ACTIVITYWATCH_INFO_URL = `http://127.0.0.1:${ACTIVITYWATCH_PORT}/api/0/info`
 const ACTIVITYWATCH_STARTUP_TIMEOUT_MS = 20_000
 const ACTIVITYWATCH_POLL_INTERVAL_MS = 500
+const ACTIVITYWATCH_EVENT_POLL_INTERVAL_MS = 2_000
 
 let awServerProcess: ChildProcessWithoutNullStreams | null = null
 let awWatcherWindowProcess: ChildProcessWithoutNullStreams | null = null
+let awWindowBucketId: string | null = null
+let awEventsPollTimer: NodeJS.Timeout | null = null
+let awEventsPollInFlight = false
+let awLatestWindowEvent: ActivityWatchEvent | null = null
+let awLastChecked = new Date().toISOString()
+
+interface ActivityWatchEventData {
+  app?: string
+  title?: string
+  [key: string]: unknown
+}
+
+interface ActivityWatchEvent {
+  timestamp: string
+  duration: number
+  data: ActivityWatchEventData
+  [key: string]: unknown
+}
 
 function getActivityWatchPlatform(): string {
   if (process.platform === 'darwin') return 'macos'
@@ -117,6 +137,108 @@ async function waitForActivityWatchServerReady(): Promise<void> {
   )
 }
 
+async function discoverWindowBucketId(): Promise<string | null> {
+  try {
+    const response = await fetch(`${ACTIVITYWATCH_BASE_URL}/api/0/buckets/`)
+    if (!response.ok) {
+      throw new Error(`Bucket discovery failed with status ${response.status}`)
+    }
+
+    const buckets = (await response.json()) as Record<string, unknown>
+    const bucketId = Object.keys(buckets).find((id) => id.startsWith('aw-watcher-window_')) ?? null
+
+    if (bucketId) {
+      console.log(`[aw-poll] using window bucket ${bucketId}`)
+    } else {
+      console.warn('[aw-poll] no aw-watcher-window bucket found yet')
+    }
+
+    return bucketId
+  } catch (error) {
+    console.error('[aw-poll] failed to discover buckets:', error)
+    return null
+  }
+}
+
+function computeNextLastChecked(events: ActivityWatchEvent[], fallbackIso: string): string {
+  const newestTimestamp = events[events.length - 1]?.timestamp
+  if (typeof newestTimestamp !== 'string') return fallbackIso
+
+  const timestampMs = Date.parse(newestTimestamp)
+  if (Number.isNaN(timestampMs)) return fallbackIso
+
+  // Add 1ms to avoid re-reading the latest event when `start` is inclusive.
+  return new Date(timestampMs + 1).toISOString()
+}
+
+function broadcastLatestWindowEvent(event: ActivityWatchEvent): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed()) {
+      window.webContents.send('activitywatch:latest-event', event)
+    }
+  }
+}
+
+async function pollActivityWatchWindowEvents(): Promise<void> {
+  if (awEventsPollInFlight) return
+
+  awEventsPollInFlight = true
+  const pollStartedAt = new Date().toISOString()
+
+  try {
+    if (!awWindowBucketId) {
+      awWindowBucketId = await discoverWindowBucketId()
+      if (!awWindowBucketId) return
+    }
+
+    const bucketUrl = `${ACTIVITYWATCH_BASE_URL}/api/0/buckets/${encodeURIComponent(awWindowBucketId)}/events`
+    const response = await fetch(`${bucketUrl}?start=${encodeURIComponent(awLastChecked)}`)
+
+    if (response.status === 404) {
+      console.warn(`[aw-poll] bucket ${awWindowBucketId} not found, rediscovering`)
+      awWindowBucketId = null
+      return
+    }
+
+    if (!response.ok) {
+      throw new Error(`Event polling failed with status ${response.status}`)
+    }
+
+    const events = (await response.json()) as ActivityWatchEvent[]
+    if (events.length > 0) {
+      for (const event of events) {
+        console.log('[aw-event]', event)
+      }
+
+      awLatestWindowEvent = events[events.length - 1]
+      broadcastLatestWindowEvent(awLatestWindowEvent)
+      awLastChecked = computeNextLastChecked(events, pollStartedAt)
+      return
+    }
+
+    awLastChecked = pollStartedAt
+  } catch (error) {
+    console.error('[aw-poll] polling error:', error)
+  } finally {
+    awEventsPollInFlight = false
+  }
+}
+
+async function startActivityWatchEventPolling(): Promise<void> {
+  awLastChecked = new Date().toISOString()
+  awWindowBucketId = await discoverWindowBucketId()
+
+  if (awEventsPollTimer) {
+    clearInterval(awEventsPollTimer)
+  }
+
+  awEventsPollTimer = setInterval(() => {
+    void pollActivityWatchWindowEvents()
+  }, ACTIVITYWATCH_EVENT_POLL_INTERVAL_MS)
+
+  void pollActivityWatchWindowEvents()
+}
+
 async function startActivityWatch(): Promise<void> {
   const activityWatchRoot = resolveActivityWatchRoot()
   const awServerBinary = resolveBinaryPath(activityWatchRoot, 'aw-server', 'aw-server')
@@ -159,9 +281,16 @@ async function startActivityWatch(): Promise<void> {
       stdio: 'pipe'
     })
   )
+
+  await startActivityWatchEventPolling()
 }
 
 function stopActivityWatchProcesses(): void {
+  if (awEventsPollTimer) {
+    clearInterval(awEventsPollTimer)
+    awEventsPollTimer = null
+  }
+
   for (const processToStop of [awWatcherWindowProcess, awServerProcess]) {
     if (processToStop && processToStop.exitCode === null && !processToStop.killed) {
       processToStop.kill('SIGTERM')
@@ -217,6 +346,7 @@ app.whenReady().then(() => {
 
   // IPC test
   ipcMain.on('ping', () => console.log('pong'))
+  ipcMain.handle('activitywatch:get-latest-event', () => awLatestWindowEvent)
 
   startActivityWatch().catch((error) => {
     console.error('Failed to start ActivityWatch services:', error)

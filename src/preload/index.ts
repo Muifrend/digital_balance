@@ -1,8 +1,34 @@
-import { contextBridge } from 'electron'
+import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 
+interface ActivityWatchEventData {
+  app?: string
+  title?: string
+  [key: string]: unknown
+}
+
+interface ActivityWatchEvent {
+  timestamp: string
+  duration: number
+  data: ActivityWatchEventData
+  [key: string]: unknown
+}
+
 // Custom APIs for renderer
-const api = {}
+const api = {
+  getLatestActivityWatchEvent: (): Promise<ActivityWatchEvent | null> =>
+    ipcRenderer.invoke('activitywatch:get-latest-event'),
+  onLatestActivityWatchEvent: (callback: (event: ActivityWatchEvent) => void): (() => void) => {
+    const listener = (_: Electron.IpcRendererEvent, event: ActivityWatchEvent) => {
+      callback(event)
+    }
+
+    ipcRenderer.on('activitywatch:latest-event', listener)
+    return () => {
+      ipcRenderer.removeListener('activitywatch:latest-event', listener)
+    }
+  }
+}
 
 // Use `contextBridge` APIs to expose Electron APIs to
 // renderer only if context isolation is enabled, otherwise
