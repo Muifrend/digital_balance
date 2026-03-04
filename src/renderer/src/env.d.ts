@@ -15,6 +15,8 @@ interface ActivityWatchEvent {
 
 interface RendererApi {
   getLatestActivityWatchEvent: () => Promise<ActivityWatchEvent | null>
+  getGoals: () => Promise<string[]>
+  setGoals: (goals: string[]) => Promise<string[]>
   onLatestActivityWatchEvent: (callback: (event: ActivityWatchEvent) => void) => () => void
 }
 

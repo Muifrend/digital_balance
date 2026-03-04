@@ -2,15 +2,25 @@ import { JSX, useEffect, useState } from 'react'
 
 function App(): JSX.Element {
   const [latestEvent, setLatestEvent] = useState<ActivityWatchEvent | null>(null)
+  const [goals, setGoals] = useState<string[]>([])
+  const [goalInput, setGoalInput] = useState('')
+  const [saveMessage, setSaveMessage] = useState('')
 
   useEffect(() => {
     let isMounted = true
 
-    void window.api.getLatestActivityWatchEvent().then((event) => {
-      if (isMounted && event) {
-        setLatestEvent(event)
+    void Promise.all([window.api.getLatestActivityWatchEvent(), window.api.getGoals()]).then(
+      ([event, loadedGoals]) => {
+        if (!isMounted) return
+
+        if (event) {
+          setLatestEvent(event)
+        }
+
+        setGoals(loadedGoals)
+        setGoalInput(loadedGoals[0] ?? '')
       }
-    })
+    )
 
     const unsubscribe = window.api.onLatestActivityWatchEvent((event) => {
       setLatestEvent(event)
@@ -22,16 +32,40 @@ function App(): JSX.Element {
     }
   }, [])
 
+  const handleSaveGoal = async (): Promise<void> => {
+    const nextGoals = goalInput.trim() ? [goalInput.trim()] : []
+    const savedGoals = await window.api.setGoals(nextGoals)
+    setGoals(savedGoals)
+    setGoalInput(savedGoals[0] ?? '')
+    setSaveMessage('Saved.')
+  }
+
   return (
-    <main className="p-6">
-      <h1 className="text-2xl font-bold">FocusLens Event Stream</h1>
-      {latestEvent ? (
-        <pre className="mt-4 overflow-auto rounded bg-slate-100 p-4 text-sm">
-          {JSON.stringify(latestEvent, null, 2)}
-        </pre>
-      ) : (
-        <p className="mt-4 text-slate-600">No ActivityWatch window events received yet.</p>
-      )}
+    <main>
+      <h1>FocusLens</h1>
+
+      <section>
+        <h2>Weekly Goal</h2>
+        <p>Current goal: {goals[0] ?? 'None set'}</p>
+        <input
+          type="text"
+          value={goalInput}
+          onChange={(event) => {
+            setGoalInput(event.target.value)
+            if (saveMessage) setSaveMessage('')
+          }}
+          placeholder="Enter your weekly goal"
+        />
+        <button type="button" onClick={() => void handleSaveGoal()}>
+          Save Goal
+        </button>
+        {saveMessage && <p>{saveMessage}</p>}
+      </section>
+
+      <section>
+        <h2>Latest ActivityWatch Event</h2>
+        {latestEvent ? <pre>{JSON.stringify(latestEvent, null, 2)}</pre> : <p>No events yet.</p>}
+      </section>
     </main>
   )
 }

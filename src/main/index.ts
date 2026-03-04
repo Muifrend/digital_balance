@@ -2,6 +2,7 @@ import { app, shell, BrowserWindow, ipcMain } from 'electron'
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
 import { dirname, join } from 'path'
 import { existsSync } from 'fs'
+import { mkdir, readFile, writeFile } from 'fs/promises'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 
@@ -11,6 +12,7 @@ const ACTIVITYWATCH_INFO_URL = `http://127.0.0.1:${ACTIVITYWATCH_PORT}/api/0/inf
 const ACTIVITYWATCH_STARTUP_TIMEOUT_MS = 20_000
 const ACTIVITYWATCH_POLL_INTERVAL_MS = 500
 const ACTIVITYWATCH_EVENT_POLL_INTERVAL_MS = 2_000
+const GOALS_FILE_PATH = join(process.cwd(), 'backend', 'goals.json')
 
 let awServerProcess: ChildProcessWithoutNullStreams | null = null
 let awWatcherWindowProcess: ChildProcessWithoutNullStreams | null = null
@@ -19,6 +21,7 @@ let awEventsPollTimer: NodeJS.Timeout | null = null
 let awEventsPollInFlight = false
 let awLatestWindowEvent: ActivityWatchEvent | null = null
 let awLastChecked = new Date().toISOString()
+const awSeenEventIds = new Set<number>()
 
 interface ActivityWatchEventData {
   app?: string
@@ -31,6 +34,43 @@ interface ActivityWatchEvent {
   duration: number
   data: ActivityWatchEventData
   [key: string]: unknown
+}
+
+function sanitizeGoals(goals: unknown): string[] {
+  if (!Array.isArray(goals)) return []
+
+  return goals
+    .filter((goal): goal is string => typeof goal === 'string')
+    .map((goal) => goal.trim())
+    .filter((goal) => goal.length > 0)
+    .slice(0, 1)
+}
+
+async function ensureGoalsFileExists(): Promise<void> {
+  await mkdir(dirname(GOALS_FILE_PATH), { recursive: true })
+
+  if (!existsSync(GOALS_FILE_PATH)) {
+    await writeFile(GOALS_FILE_PATH, '[]\n', 'utf8')
+  }
+}
+
+async function getGoals(): Promise<string[]> {
+  await ensureGoalsFileExists()
+
+  try {
+    const content = await readFile(GOALS_FILE_PATH, 'utf8')
+    return sanitizeGoals(JSON.parse(content))
+  } catch (error) {
+    console.error('[goals] failed reading goals file, defaulting to empty list:', error)
+    return []
+  }
+}
+
+async function setGoals(goals: string[]): Promise<string[]> {
+  await ensureGoalsFileExists()
+  const sanitizedGoals = sanitizeGoals(goals)
+  await writeFile(GOALS_FILE_PATH, `${JSON.stringify(sanitizedGoals, null, 2)}\n`, 'utf8')
+  return sanitizedGoals
 }
 
 function getActivityWatchPlatform(): string {
@@ -206,12 +246,29 @@ async function pollActivityWatchWindowEvents(): Promise<void> {
 
     const events = (await response.json()) as ActivityWatchEvent[]
     if (events.length > 0) {
-      for (const event of events) {
+      const newEvents = events.filter((event) => {
+        const eventId = (event as { id?: unknown }).id
+        if (typeof eventId !== 'number') {
+          return true
+        }
+
+        if (awSeenEventIds.has(eventId)) {
+          return false
+        }
+
+        awSeenEventIds.add(eventId)
+        return true
+      })
+
+      for (const event of newEvents) {
         console.log('[aw-event]', event)
       }
 
-      awLatestWindowEvent = events[events.length - 1]
-      broadcastLatestWindowEvent(awLatestWindowEvent)
+      if (newEvents.length > 0) {
+        awLatestWindowEvent = newEvents[newEvents.length - 1]
+        broadcastLatestWindowEvent(awLatestWindowEvent)
+      }
+
       awLastChecked = computeNextLastChecked(events, pollStartedAt)
       return
     }
@@ -347,6 +404,8 @@ app.whenReady().then(() => {
   // IPC test
   ipcMain.on('ping', () => console.log('pong'))
   ipcMain.handle('activitywatch:get-latest-event', () => awLatestWindowEvent)
+  ipcMain.handle('goals:get', async () => getGoals())
+  ipcMain.handle('goals:set', async (_event, goals: string[]) => setGoals(goals))
 
   startActivityWatch().catch((error) => {
     console.error('Failed to start ActivityWatch services:', error)
