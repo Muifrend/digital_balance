@@ -1,4 +1,4 @@
-import { useMemo, type JSX, type RefObject } from 'react'
+import { useEffect, useMemo, useState, type JSX, type RefObject } from 'react'
 import moment from 'moment'
 import { Calendar, Views, momentLocalizer } from 'react-big-calendar'
 import 'react-big-calendar/lib/css/react-big-calendar.css'
@@ -19,6 +19,7 @@ interface CalendarEvent {
 }
 
 const localizer = momentLocalizer(moment)
+const ACTIVE_BLOCK_REFRESH_MS = 10_000
 
 function toMinuteEpoch(timestamp: string): number | null {
   const parsed = Date.parse(timestamp)
@@ -30,7 +31,7 @@ function durationValue(duration: number): number {
   return Number.isFinite(duration) ? duration : 0
 }
 
-function bucketByMinute(activities: ActivityEvent[]): CalendarEvent[] {
+function bucketByMinute(activities: ActivityEvent[], nowMs: number): CalendarEvent[] {
   const dominantByMinute = new Map<number, ActivityEvent>()
 
   for (const activity of activities) {
@@ -84,6 +85,11 @@ function bucketByMinute(activities: ActivityEvent[]): CalendarEvent[] {
     }
   }
 
+  const last = merged[merged.length - 1]
+  if (nowMs > last.end.getTime()) {
+    last.end = new Date(nowMs)
+  }
+
   return merged
 }
 
@@ -104,9 +110,20 @@ export default function ActivityCalendar({
   onNavigate,
   containerRef
 }: ActivityCalendarProps): JSX.Element {
-  const events = useMemo(() => bucketByMinute(activities), [activities])
+  const [nowMs, setNowMs] = useState<number>(() => Date.now())
+  const events = useMemo(() => bucketByMinute(activities, nowMs), [activities, nowMs])
   const scrollToTime = new Date()
   scrollToTime.setMinutes(scrollToTime.getMinutes() - 30)
+
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      setNowMs(Date.now())
+    }, ACTIVE_BLOCK_REFRESH_MS)
+
+    return () => {
+      clearInterval(intervalId)
+    }
+  }, [])
 
   return (
     <section ref={containerRef} className="flex-1 h-full border-r border-gray-200 p-3 box-border">

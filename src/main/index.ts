@@ -234,7 +234,7 @@ async function discoverWindowBucketId(): Promise<string | null> {
 }
 
 function computeNextLastChecked(events: ActivityWatchEvent[], fallbackIso: string): string {
-  const newestTimestamp = events[events.length - 1]?.timestamp
+  const newestTimestamp = events[0]?.timestamp
   if (typeof newestTimestamp !== 'string') return fallbackIso
 
   const timestampMs = Date.parse(newestTimestamp)
