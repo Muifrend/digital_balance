@@ -19,20 +19,6 @@ function toActivityEvent(event: ActivityWatchEvent): ActivityEvent {
   }
 }
 
-function dedupeActivities(activities: ActivityEvent[]): ActivityEvent[] {
-  const seen = new Set<string>()
-  const output: ActivityEvent[] = []
-
-  for (const activity of activities) {
-    const key = `${activity.id}|${activity.timestamp}|${activity.app}|${activity.title}`
-    if (seen.has(key)) continue
-    seen.add(key)
-    output.push(activity)
-  }
-
-  return output
-}
-
 export default function CalendarView(): JSX.Element {
   const [activities, setActivities] = useState<ActivityEvent[]>([])
   const [classifications, setClassifications] = useState<ClassificationEntry[]>([])
@@ -61,7 +47,7 @@ export default function CalendarView(): JSX.Element {
     })
 
     const unsubscribeActivity = window.api.onLatestActivityWatchEvent((event) => {
-      setActivities((previous) => dedupeActivities([toActivityEvent(event), ...previous]))
+      setActivities((previous) => [toActivityEvent(event), ...previous])
     })
 
     return () => {

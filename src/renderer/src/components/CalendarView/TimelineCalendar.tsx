@@ -23,20 +23,6 @@ function toActivityEvent(event: ActivityWatchEvent): ActivityEvent {
   }
 }
 
-function dedupeActivities(activities: ActivityEvent[]): ActivityEvent[] {
-  const seen = new Set<string>()
-  const output: ActivityEvent[] = []
-
-  for (const activity of activities) {
-    const key = `${activity.id}|${activity.timestamp}|${activity.app}|${activity.title}`
-    if (seen.has(key)) continue
-    seen.add(key)
-    output.push(activity)
-  }
-
-  return output
-}
-
 export default function TimelineCalendar({ classifications }: TimelineCalendarProps): JSX.Element {
   const [date, setDate] = useState<Date>(new Date())
   const [activities, setActivities] = useState<ActivityEvent[]>([])
@@ -49,11 +35,11 @@ export default function TimelineCalendar({ classifications }: TimelineCalendarPr
 
     void window.api.getLatestActivityWatchEvent().then((event) => {
       if (!mounted || !event) return
-      setActivities((previous) => dedupeActivities([toActivityEvent(event), ...previous]))
+      setActivities((previous) => [toActivityEvent(event), ...previous])
     })
 
     const unsubscribe = window.api.onLatestActivityWatchEvent((event) => {
-      setActivities((previous) => dedupeActivities([toActivityEvent(event), ...previous]))
+      setActivities((previous) => [toActivityEvent(event), ...previous])
     })
 
     return () => {
@@ -120,4 +106,3 @@ export default function TimelineCalendar({ classifications }: TimelineCalendarPr
     </section>
   )
 }
-

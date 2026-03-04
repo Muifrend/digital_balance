@@ -66,11 +66,11 @@ export default function ActivityList({
         padding: 12
       }}
     >
-      {sortedActivities.map((activity) => {
+      {sortedActivities.map((activity, index) => {
         const classification = findClosestClassification(activity, classifications)
         return (
           <div
-            key={`${activity.id}-${activity.timestamp}`}
+            key={`${activity.id}-${activity.timestamp}-${index}`}
             style={{
               borderBottom: '1px solid #e5e7eb',
               padding: '8px 0',

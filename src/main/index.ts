@@ -341,28 +341,16 @@ async function pollActivityWatchWindowEvents(): Promise<void> {
 
     const events = (await response.json()) as ActivityWatchEvent[]
     if (events.length > 0) {
-      const newEvents = events.filter((event) => {
-        const eventId = (event as { id?: unknown }).id
-        if (typeof eventId !== 'number') {
-          return true
-        }
+      const latestEvent = events[0]
+      console.log('[aw-event]', latestEvent)
 
-        if (awSeenEventIds.has(eventId)) {
-          return false
-        }
+      awLatestWindowEvent = latestEvent
+      broadcastLatestWindowEvent(awLatestWindowEvent)
 
+      const eventId = (latestEvent as { id?: unknown }).id
+      if (typeof eventId === 'number' && !awSeenEventIds.has(eventId)) {
         awSeenEventIds.add(eventId)
-        return true
-      })
-
-      for (const event of newEvents) {
-        console.log('[aw-event]', event)
-      }
-
-      if (newEvents.length > 0) {
-        awLatestWindowEvent = newEvents[newEvents.length - 1]
-        broadcastLatestWindowEvent(awLatestWindowEvent)
-        scheduleDebouncedClassification(awLatestWindowEvent)
+        scheduleDebouncedClassification(latestEvent)
       }
 
       awLastChecked = computeNextLastChecked(events, pollStartedAt)
