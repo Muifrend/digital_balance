@@ -12,14 +12,22 @@ const ACTIVITYWATCH_INFO_URL = `http://127.0.0.1:${ACTIVITYWATCH_PORT}/api/0/inf
 const ACTIVITYWATCH_STARTUP_TIMEOUT_MS = 20_000
 const ACTIVITYWATCH_POLL_INTERVAL_MS = 500
 const ACTIVITYWATCH_EVENT_POLL_INTERVAL_MS = 2_000
+const CLASSIFICATION_DEBOUNCE_MS = 30_000
+const CLASSIFICATION_API_URL = 'http://127.0.0.1:5001/classify'
+const PROJECT_ROOT = process.cwd()
 const GOALS_FILE_PATH = join(process.cwd(), 'backend', 'goals.json')
+const SIDECAR_SCRIPT_PATH = join(PROJECT_ROOT, 'backend', 'sidecar', 'analyzer.py')
+const ENV_FILE_PATH = join(PROJECT_ROOT, '.env')
 
 let awServerProcess: ChildProcessWithoutNullStreams | null = null
 let awWatcherWindowProcess: ChildProcessWithoutNullStreams | null = null
+let analyzerSidecarProcess: ChildProcessWithoutNullStreams | null = null
 let awWindowBucketId: string | null = null
 let awEventsPollTimer: NodeJS.Timeout | null = null
 let awEventsPollInFlight = false
+let classificationDebounceTimer: NodeJS.Timeout | null = null
 let awLatestWindowEvent: ActivityWatchEvent | null = null
+let latestClassificationResult: ClassificationResult | null = null
 let awLastChecked = new Date().toISOString()
 const awSeenEventIds = new Set<number>()
 
@@ -34,6 +42,12 @@ interface ActivityWatchEvent {
   duration: number
   data: ActivityWatchEventData
   [key: string]: unknown
+}
+
+interface ClassificationResult {
+  onGoal: boolean
+  confidence: number
+  reasoning: string
 }
 
 function sanitizeGoals(goals: unknown): string[] {
@@ -100,6 +114,14 @@ function resolveActivityWatchRoot(): string {
 function resolveBinaryPath(baseDir: string, binaryFolder: string, binaryName: string): string {
   const executableName = process.platform === 'win32' ? `${binaryName}.exe` : binaryName
   return join(baseDir, binaryFolder, executableName)
+}
+
+function resolveVenvPythonPath(): string {
+  if (process.platform === 'win32') {
+    return join(PROJECT_ROOT, '.venv', 'Scripts', 'python.exe')
+  }
+
+  return join(PROJECT_ROOT, '.venv', 'bin', 'python')
 }
 
 function buildActivityWatchEnv(baseDir: string, binaryDir: string): NodeJS.ProcessEnv {
@@ -219,6 +241,56 @@ function broadcastLatestWindowEvent(event: ActivityWatchEvent): void {
   }
 }
 
+function broadcastLatestClassification(result: ClassificationResult): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed()) {
+      window.webContents.send('classification:latest', result)
+    }
+  }
+}
+
+async function classifyEventWithCurrentGoal(event: ActivityWatchEvent): Promise<void> {
+  const goals = await getGoals()
+  const goal = goals[0] ?? ''
+  const appName = event.data.app ?? ''
+  const title = event.data.title ?? ''
+
+  try {
+    const response = await fetch(CLASSIFICATION_API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ app: appName, title, goal })
+    })
+
+    if (!response.ok) {
+      throw new Error(`Classification request failed with status ${response.status}`)
+    }
+
+    const rawResult = (await response.json()) as Partial<ClassificationResult>
+    const classification: ClassificationResult = {
+      onGoal: Boolean(rawResult.onGoal),
+      confidence: typeof rawResult.confidence === 'number' ? rawResult.confidence : 0,
+      reasoning: typeof rawResult.reasoning === 'string' ? rawResult.reasoning : ''
+    }
+
+    latestClassificationResult = classification
+    console.log('[classification]', classification)
+    broadcastLatestClassification(classification)
+  } catch (error) {
+    console.error('[classification] failed:', error)
+  }
+}
+
+function scheduleDebouncedClassification(event: ActivityWatchEvent): void {
+  if (classificationDebounceTimer) {
+    clearTimeout(classificationDebounceTimer)
+  }
+
+  classificationDebounceTimer = setTimeout(() => {
+    void classifyEventWithCurrentGoal(event)
+  }, CLASSIFICATION_DEBOUNCE_MS)
+}
+
 async function pollActivityWatchWindowEvents(): Promise<void> {
   if (awEventsPollInFlight) return
 
@@ -267,6 +339,7 @@ async function pollActivityWatchWindowEvents(): Promise<void> {
       if (newEvents.length > 0) {
         awLatestWindowEvent = newEvents[newEvents.length - 1]
         broadcastLatestWindowEvent(awLatestWindowEvent)
+        scheduleDebouncedClassification(awLatestWindowEvent)
       }
 
       awLastChecked = computeNextLastChecked(events, pollStartedAt)
@@ -342,13 +415,41 @@ async function startActivityWatch(): Promise<void> {
   await startActivityWatchEventPolling()
 }
 
+function startAnalyzerSidecar(): void {
+  const pythonExecutable = resolveVenvPythonPath()
+  if (!existsSync(pythonExecutable)) {
+    throw new Error(`Venv Python binary not found at ${pythonExecutable}`)
+  }
+
+  if (!existsSync(SIDECAR_SCRIPT_PATH)) {
+    throw new Error(`Analyzer sidecar script not found at ${SIDECAR_SCRIPT_PATH}`)
+  }
+
+  analyzerSidecarProcess = attachProcessLogging(
+    'analyzer-sidecar',
+    spawn(pythonExecutable, [SIDECAR_SCRIPT_PATH], {
+      cwd: dirname(SIDECAR_SCRIPT_PATH),
+      env: {
+        ...process.env,
+        PYTHONUNBUFFERED: '1',
+        FOCUSLENS_ENV_PATH: ENV_FILE_PATH
+      },
+      stdio: 'pipe'
+    })
+  )
+}
+
 function stopActivityWatchProcesses(): void {
   if (awEventsPollTimer) {
     clearInterval(awEventsPollTimer)
     awEventsPollTimer = null
   }
+  if (classificationDebounceTimer) {
+    clearTimeout(classificationDebounceTimer)
+    classificationDebounceTimer = null
+  }
 
-  for (const processToStop of [awWatcherWindowProcess, awServerProcess]) {
+  for (const processToStop of [analyzerSidecarProcess, awWatcherWindowProcess, awServerProcess]) {
     if (processToStop && processToStop.exitCode === null && !processToStop.killed) {
       processToStop.kill('SIGTERM')
     }
@@ -404,12 +505,18 @@ app.whenReady().then(() => {
   // IPC test
   ipcMain.on('ping', () => console.log('pong'))
   ipcMain.handle('activitywatch:get-latest-event', () => awLatestWindowEvent)
+  ipcMain.handle('classification:get-latest', () => latestClassificationResult)
   ipcMain.handle('goals:get', async () => getGoals())
   ipcMain.handle('goals:set', async (_event, goals: string[]) => setGoals(goals))
 
   startActivityWatch().catch((error) => {
     console.error('Failed to start ActivityWatch services:', error)
   })
+  try {
+    startAnalyzerSidecar()
+  } catch (error) {
+    console.error('Failed to start analyzer sidecar:', error)
+  }
 
   createWindow()
 
