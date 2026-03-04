@@ -14,6 +14,7 @@ const ACTIVITYWATCH_POLL_INTERVAL_MS = 500
 const ACTIVITYWATCH_EVENT_POLL_INTERVAL_MS = 2_000
 const CLASSIFICATION_DEBOUNCE_MS = 30_000
 const CLASSIFICATION_API_URL = 'http://127.0.0.1:5001/classify'
+const CLASSIFICATION_HISTORY_LIMIT = 500
 const PROJECT_ROOT = process.cwd()
 const GOALS_FILE_PATH = join(process.cwd(), 'backend', 'goals.json')
 const SIDECAR_SCRIPT_PATH = join(PROJECT_ROOT, 'backend', 'sidecar', 'analyzer.py')
@@ -28,6 +29,7 @@ let awEventsPollInFlight = false
 let classificationDebounceTimer: NodeJS.Timeout | null = null
 let awLatestWindowEvent: ActivityWatchEvent | null = null
 let latestClassificationResult: ClassificationResult | null = null
+let classificationHistory: ClassificationHistoryEntry[] = []
 let awLastChecked = new Date().toISOString()
 const awSeenEventIds = new Set<number>()
 
@@ -45,6 +47,15 @@ interface ActivityWatchEvent {
 }
 
 interface ClassificationResult {
+  onGoal: boolean
+  confidence: number
+  reasoning: string
+}
+
+interface ClassificationHistoryEntry {
+  timestamp: string
+  app: string
+  title: string
   onGoal: boolean
   confidence: number
   reasoning: string
@@ -272,8 +283,20 @@ async function classifyEventWithCurrentGoal(event: ActivityWatchEvent): Promise<
       confidence: typeof rawResult.confidence === 'number' ? rawResult.confidence : 0,
       reasoning: typeof rawResult.reasoning === 'string' ? rawResult.reasoning : ''
     }
+    const historyEntry: ClassificationHistoryEntry = {
+      timestamp: new Date().toISOString(),
+      app: appName,
+      title,
+      onGoal: classification.onGoal,
+      confidence: classification.confidence,
+      reasoning: classification.reasoning
+    }
 
     latestClassificationResult = classification
+    classificationHistory.push(historyEntry)
+    if (classificationHistory.length > CLASSIFICATION_HISTORY_LIMIT) {
+      classificationHistory = classificationHistory.slice(-CLASSIFICATION_HISTORY_LIMIT)
+    }
     console.log('[classification]', classification)
     broadcastLatestClassification(classification)
   } catch (error) {
@@ -506,6 +529,10 @@ app.whenReady().then(() => {
   ipcMain.on('ping', () => console.log('pong'))
   ipcMain.handle('activitywatch:get-latest-event', () => awLatestWindowEvent)
   ipcMain.handle('classification:get-latest', () => latestClassificationResult)
+  ipcMain.handle('classification:get-history', () => classificationHistory)
+  ipcMain.handle('classification:clear-history', () => {
+    classificationHistory = []
+  })
   ipcMain.handle('goals:get', async () => getGoals())
   ipcMain.handle('goals:set', async (_event, goals: string[]) => setGoals(goals))
 
