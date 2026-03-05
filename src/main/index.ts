@@ -14,6 +14,7 @@ const ACTIVITYWATCH_POLL_INTERVAL_MS = 500
 const ACTIVITYWATCH_EVENT_POLL_INTERVAL_MS = 2_000
 const CLASSIFICATION_DEBOUNCE_MS = 30_000
 const CLASSIFICATION_API_URL = 'http://127.0.0.1:5001/classify'
+const CLASSIFICATION_HISTORY_LIMIT = 500
 const PROJECT_ROOT = process.cwd()
 const GOALS_FILE_PATH = join(process.cwd(), 'backend', 'goals.json')
 const SIDECAR_SCRIPT_PATH = join(PROJECT_ROOT, 'backend', 'sidecar', 'analyzer.py')
@@ -27,9 +28,10 @@ let awEventsPollTimer: NodeJS.Timeout | null = null
 let awEventsPollInFlight = false
 let classificationDebounceTimer: NodeJS.Timeout | null = null
 let awLatestWindowEvent: ActivityWatchEvent | null = null
-let latestClassificationResult: ClassificationResult | null = null
+let latestClassificationResult: ClassificationEntry | null = null
 let awLastChecked = new Date().toISOString()
 const awSeenEventIds = new Set<number>()
+const classificationHistory: ClassificationEntry[] = []
 
 interface ActivityWatchEventData {
   app?: string
@@ -38,6 +40,7 @@ interface ActivityWatchEventData {
 }
 
 interface ActivityWatchEvent {
+  id?: number
   timestamp: string
   duration: number
   data: ActivityWatchEventData
@@ -48,6 +51,12 @@ interface ClassificationResult {
   onGoal: boolean
   confidence: number
   reasoning: string
+}
+
+interface ClassificationEntry extends ClassificationResult {
+  timestamp: string
+  app: string
+  title: string
 }
 
 function sanitizeGoals(goals: unknown): string[] {
@@ -241,12 +250,24 @@ function broadcastLatestWindowEvent(event: ActivityWatchEvent): void {
   }
 }
 
-function broadcastLatestClassification(result: ClassificationResult): void {
+function broadcastActivityWatchHeartbeat(event: ActivityWatchEvent): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed()) {
+      window.webContents.send('activitywatch:heartbeat', event)
+    }
+  }
+}
+
+function broadcastLatestClassification(result: ClassificationEntry): void {
   for (const window of BrowserWindow.getAllWindows()) {
     if (!window.isDestroyed()) {
       window.webContents.send('classification:latest', result)
     }
   }
+}
+
+function buildHeartbeatEvent(event: ActivityWatchEvent, timestamp: string): ActivityWatchEvent {
+  return { ...event, timestamp }
 }
 
 async function classifyEventWithCurrentGoal(event: ActivityWatchEvent): Promise<void> {
@@ -267,13 +288,20 @@ async function classifyEventWithCurrentGoal(event: ActivityWatchEvent): Promise<
     }
 
     const rawResult = (await response.json()) as Partial<ClassificationResult>
-    const classification: ClassificationResult = {
+    const classification: ClassificationEntry = {
+      timestamp: new Date().toISOString(),
+      app: appName,
+      title,
       onGoal: Boolean(rawResult.onGoal),
       confidence: typeof rawResult.confidence === 'number' ? rawResult.confidence : 0,
       reasoning: typeof rawResult.reasoning === 'string' ? rawResult.reasoning : ''
     }
 
     latestClassificationResult = classification
+    classificationHistory.push(classification)
+    if (classificationHistory.length > CLASSIFICATION_HISTORY_LIMIT) {
+      classificationHistory.splice(0, classificationHistory.length - CLASSIFICATION_HISTORY_LIMIT)
+    }
     console.log('[classification]', classification)
     broadcastLatestClassification(classification)
   } catch (error) {
@@ -343,10 +371,16 @@ async function pollActivityWatchWindowEvents(): Promise<void> {
       }
 
       awLastChecked = computeNextLastChecked(events, pollStartedAt)
+      if (newEvents.length === 0 && awLatestWindowEvent) {
+        broadcastActivityWatchHeartbeat(buildHeartbeatEvent(awLatestWindowEvent, pollStartedAt))
+      }
       return
     }
 
     awLastChecked = pollStartedAt
+    if (awLatestWindowEvent) {
+      broadcastActivityWatchHeartbeat(buildHeartbeatEvent(awLatestWindowEvent, pollStartedAt))
+    }
   } catch (error) {
     console.error('[aw-poll] polling error:', error)
   } finally {
@@ -506,6 +540,7 @@ app.whenReady().then(() => {
   ipcMain.on('ping', () => console.log('pong'))
   ipcMain.handle('activitywatch:get-latest-event', () => awLatestWindowEvent)
   ipcMain.handle('classification:get-latest', () => latestClassificationResult)
+  ipcMain.handle('classification:get-history', () => classificationHistory)
   ipcMain.handle('goals:get', async () => getGoals())
   ipcMain.handle('goals:set', async (_event, goals: string[]) => setGoals(goals))
 

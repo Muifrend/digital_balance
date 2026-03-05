@@ -8,16 +8,28 @@ interface ActivityWatchEventData {
 }
 
 interface ActivityWatchEvent {
+  id?: number
   timestamp: string
   duration: number
   data: ActivityWatchEventData
   [key: string]: unknown
 }
 
+interface ClassificationEntry {
+  timestamp: string
+  app: string
+  title: string
+  onGoal: boolean
+  confidence: number
+  reasoning: string
+}
+
 // Custom APIs for renderer
 const api = {
   getLatestActivityWatchEvent: (): Promise<ActivityWatchEvent | null> =>
     ipcRenderer.invoke('activitywatch:get-latest-event'),
+  getClassificationHistory: (): Promise<ClassificationEntry[]> =>
+    ipcRenderer.invoke('classification:get-history'),
   getGoals: (): Promise<string[]> => ipcRenderer.invoke('goals:get'),
   setGoals: (goals: string[]): Promise<string[]> => ipcRenderer.invoke('goals:set', goals),
   onLatestActivityWatchEvent: (callback: (event: ActivityWatchEvent) => void): (() => void) => {
@@ -28,6 +40,26 @@ const api = {
     ipcRenderer.on('activitywatch:latest-event', listener)
     return () => {
       ipcRenderer.removeListener('activitywatch:latest-event', listener)
+    }
+  },
+  onActivityWatchHeartbeat: (callback: (event: ActivityWatchEvent) => void): (() => void) => {
+    const listener = (_: Electron.IpcRendererEvent, event: ActivityWatchEvent): void => {
+      callback(event)
+    }
+
+    ipcRenderer.on('activitywatch:heartbeat', listener)
+    return () => {
+      ipcRenderer.removeListener('activitywatch:heartbeat', listener)
+    }
+  },
+  onLatestClassification: (callback: (entry: ClassificationEntry) => void): (() => void) => {
+    const listener = (_: Electron.IpcRendererEvent, entry: ClassificationEntry): void => {
+      callback(entry)
+    }
+
+    ipcRenderer.on('classification:latest', listener)
+    return () => {
+      ipcRenderer.removeListener('classification:latest', listener)
     }
   }
 }

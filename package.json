@@ -25,6 +25,7 @@
     "@electron-toolkit/utils": "^4.0.0",
     "electron-updater": "^6.3.9",
     "memento": "^0.1.51",
+    "moment": "^2.30.1",
     "react-big-calendar": "^1.19.4"
   },
   "devDependencies": {
@@ -34,6 +35,7 @@
     "@tailwindcss/vite": "^4.1.18",
     "@types/node": "^22.19.1",
     "@types/react": "^19.2.7",
+    "@types/react-big-calendar": "^1.16.3",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.1",
     "electron": "^39.2.6",
