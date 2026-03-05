@@ -1,37 +1,52 @@
 # FocusLens
 
-## Project Context
-Electron + React/TypeScript desktop app that wraps ActivityWatch (open source local time tracker) and adds AI-powered goal-aware productivity analysis.
-
-ActivityWatch runs as a local Python/Flask server on `localhost:5600` and exposes a REST API for window/tab/AFK events. The Electron app spawns ActivityWatch and its watchers as child processes on startup, polls the ActivityWatch API for events, and passes them to a Python sidecar that handles debounce logic, screenshots, and LLM classification. Classifications are stored in a local SQLite DB. The renderer communicates with the main process via Electron IPC (contextBridge/preload pattern).
-
 ## Key Architecture
 ```
 Electron Main (src/main/index.ts)
   → spawns aw-server (localhost:5600)
   → spawns aw-watcher-window
-  → spawns backend/sidecar/analyzer.py
+  → spawns backend/sidecar/analyzer.py (localhost:5001)
+  → polls AW API every 2s with timestamp + ID deduplication
+  → 30s debounce on new events → POST /classify to sidecar
+  → maintains in-memory classification history (capped at 500)
   → handles IPC from renderer
 
 Preload (src/preload/index.ts)
   → contextBridge exposes safe APIs to renderer
 
-Renderer (src/renderer/)
-  → React UI: calendar view, goal setter, session report, AI toggle
+
 
 Python Sidecar (backend/sidecar/analyzer.py)
-  → polls localhost:5600 for window events
-  → 30s debounce after event trigger
-  → screenshot every 5 mins
-  → LLM call (metadata first, screenshot fallback)
-  → stores classifications in focuslens.db (SQLite)
+  → HTTP server on localhost:5001
+  → POST /classify — receives { app, title, goal }, calls OpenAI gpt-4o-mini
+  → returns { onGoal: boolean, confidence: number, reasoning: string }
+  → POST /screenshot — stub, returns { status: "not implemented" }
+  → reads OPENAI_API_KEY from .env via FOCUSLENS_ENV_PATH env var
 ```
 
 ## Key Files
-- `src/main/index.ts` — spawns AW processes, handles IPC, manages process lifecycle
-- `src/preload/index.ts` — exposes getEvents, getGoals, getClassifications, toggleAI
-- `backend/sidecar/analyzer.py` — screenshot + LLM classification loop
+- `src/main/index.ts` — spawns AW + sidecar, polling loop, debounce, classification, IPC handlers
+- `src/preload/index.ts` — exposes getGoals, setGoals, getLatestActivityWatchEvent, onLatestActivityWatchEvent, getLatestClassification, onLatestClassification, getClassificationHistory, clearClassificationHistory
+- `backend/sidecar/analyzer.py` — OpenAI classification endpoint, SO_REUSEADDR set
+- `backend/goals.json` — stores current weekly goal (single goal for now)
 - `resources/activitywatch/` — prebuilt AW binaries per platform
+- `src/renderer/src/components/CalendarView/index.tsx` — owns all IPC, passes data to children
+- `src/renderer/src/components/CalendarView/ActivityList.tsx` — left panel, raw events + badges
+- `src/renderer/src/components/CalendarView/ActivityCalendar.tsx` — 1-min bucketed calendar
+- `src/renderer/src/components/CalendarView/ClassificationCalendar.tsx` — AI calendar (stub)
+- `src/renderer/src/components/CalendarView/types.ts` — shared ActivityEvent, ClassificationEntry types
+
+## IPC Channels
+```
+goals:get                    → string[]
+goals:set                    → string[]
+activitywatch:latest-event   → broadcast ActivityEvent
+activitywatch:get-latest-event → ActivityEvent | null
+classification:latest        → broadcast ClassificationEntry
+classification:get-latest    → ClassificationEntry | null
+classification:get-history   → ClassificationEntry[]
+classification:clear-history → void
+```
 
 ## ActivityWatch API (localhost:5600)
 ```
@@ -41,20 +56,37 @@ POST /api/0/query/                            # query across buckets
 GET  /api/0/info                              # server info / health check
 ```
 Window events come from bucket: `aw-watcher-window_{hostname}`
-Each event: `{ timestamp, duration, data: { app, title } }`
+Each event: `{ id: number, timestamp: string, duration: number, data: { app: string, title: string } }`
+
+## Polling & Classification Flow
+```
+every 2s → GET /events?start={awLastChecked}
+  → filter by seenEventIds (Set<number>) for deduplication
+  → update awLastChecked
+  → on new event → scheduleDebouncedClassification(event)
+      → cancel existing timer
+      → after 30s → classifyEventWithCurrentGoal(event)
+          → read goal from goals.json
+          → POST localhost:5001/classify
+          → append to classificationHistory[]
+          → broadcast classification:latest
+```
 
 ## Core Features
-- **Weekly Goals** — user defines 1-5 goals, used as LLM classification lens
-- **Smart Screenshots** — 30s after trigger, then every 5 mins
-- **AI Toggle** — pause analysis for personal use, time logged as "personal"
-- **LLM Classification** — metadata first
-- **Calendar View** — Memtime-style color-coded goal blocks
-- **Session Report** — per-tab distraction tags + qualitative summary
+- **Single Weekly Goal** — user defines one goal stored in `backend/goals.json`
+- **2s Polling + ID Dedup** — only genuine new window switches propagate
+- **30s Debounce** — classification only fires after user settles in a window
+- **AI Classification** — OpenAI gpt-4o-mini, metadata only (no screenshots yet)
+- **Two Calendar View** — activity calendar (1-min bucketed, app colors) + AI calendar (stub)
+- **Activity List** — left panel showing raw events with on-goal/distracted/unclassified badges
+- **AI Toggle** — planned, not yet implemented
+- **Screenshot fallback** — planned, not yet implemented
+- **SQLite persistence** — planned, not yet implemented
 
 ## Platform Notes
 - Primary target: macOS
 - Linux dev environment: Ubuntu on Xorg (not Wayland — pynput/Xlib incompatibility)
-- AFK detection skipped for now
+- aw-watcher-afk skipped (Wayland incompatibility), AFK detection planned via GNOME idle monitor
 - AW binaries in resources/ are platform-specific, not committed to git
 
 ## Dev Setup
@@ -62,10 +94,14 @@ Each event: `{ timestamp, duration, data: { app, title } }`
 # Python
 python -m venv .venv
 source .venv/bin/activate
-pip install aw-server aw-watcher-window
+pip install aw-server aw-watcher-window openai python-dotenv
 
 # Node
 npm install
+
+# Environment
+cp .env.example .env
+# add OPENAI_API_KEY=sk-... to .env
 
 # AW binaries (download from github.com/ActivityWatch/activitywatch/releases)
 # unzip into resources/activitywatch/{platform}/
@@ -73,6 +109,7 @@ npm install
 ```
 
 ---
+
 
 ## Workflow Orchestration
 ### 1. Plan Node Default

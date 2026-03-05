@@ -21,7 +21,7 @@ const api = {
   getGoals: (): Promise<string[]> => ipcRenderer.invoke('goals:get'),
   setGoals: (goals: string[]): Promise<string[]> => ipcRenderer.invoke('goals:set', goals),
   onLatestActivityWatchEvent: (callback: (event: ActivityWatchEvent) => void): (() => void) => {
-    const listener = (_: Electron.IpcRendererEvent, event: ActivityWatchEvent) => {
+    const listener = (_: Electron.IpcRendererEvent, event: ActivityWatchEvent): void => {
       callback(event)
     }
 

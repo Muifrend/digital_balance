@@ -170,6 +170,7 @@ class AnalyzerHandler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
+    ThreadingHTTPServer.allow_reuse_address = True
     server = ThreadingHTTPServer((HOST, PORT), AnalyzerHandler)
     print(f"[analyzer] starting on http://{HOST}:{PORT}")
     print(f"[analyzer] using env file path: {_resolve_env_path()}")
