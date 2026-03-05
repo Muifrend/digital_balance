@@ -1,64 +1,63 @@
-import { useEffect, useState, type Dispatch, type SetStateAction } from 'react'
+import { useEffect, useState, type Dispatch, type JSX, type SetStateAction } from 'react'
 import ActivityCalendar from './ActivityCalendar'
 import ActivityList from './ActivityList'
 import ClassificationCalendar from './ClassificationCalendar'
-import type { ActivityEvent, ClassificationEntry as CalendarClassificationEntry } from './types'
+import type { ActivityEvent, ClassificationEntry } from './types'
+import {
+  normalizeActivityEvent,
+  normalizeClassificationEntry,
+  upsertActivityEvent
+} from './utils/streamState'
 
-function normalizeActivityEvent(event: ActivityWatchEvent | null): ActivityEvent | null {
-  if (!event || typeof event.id !== 'number') return null
-
-  const timestamp = typeof event.timestamp === 'string' ? event.timestamp : ''
-  const duration = typeof event.duration === 'number' ? event.duration : 0
-  const app = typeof event.data?.app === 'string' ? event.data.app : 'Unknown'
-  const title = typeof event.data?.title === 'string' ? event.data.title : ''
-
-  if (!timestamp) return null
-
-  return {
-    id: event.id,
-    timestamp,
-    duration,
-    data: {
-      app,
-      title
-    }
-  }
+interface SeedState {
+  latestEvent: ActivityWatchEvent | null
+  history: ClassificationEntry[]
+  loadedGoals: string[]
 }
 
-function normalizeClassification(entry: Partial<CalendarClassificationEntry>):
-  | CalendarClassificationEntry
-  | null {
-  if (!entry || typeof entry.timestamp !== 'string') return null
-
-  return {
-    timestamp: entry.timestamp,
-    app: typeof entry.app === 'string' ? entry.app : 'Unknown',
-    title: typeof entry.title === 'string' ? entry.title : '',
-    onGoal: Boolean(entry.onGoal),
-    confidence: typeof entry.confidence === 'number' ? entry.confidence : 0,
-    reasoning: typeof entry.reasoning === 'string' ? entry.reasoning : ''
-  }
-}
-
-function upsertEvent(
+function applySeedState(
+  seed: SeedState,
   setRawEvents: Dispatch<SetStateAction<ActivityEvent[]>>,
-  incoming: ActivityEvent
+  setRawClassifications: Dispatch<SetStateAction<ClassificationEntry[]>>,
+  setGoals: Dispatch<SetStateAction<string[]>>,
+  setGoalInput: Dispatch<SetStateAction<string>>
 ): void {
-  setRawEvents((previous) => {
-    const idx = previous.findIndex((event) => event.id === incoming.id)
-    if (idx >= 0) {
-      const updated = [...previous]
-      updated[idx] = incoming
-      return updated
-    }
+  const normalizedEvent = normalizeActivityEvent(seed.latestEvent)
+  if (normalizedEvent) setRawEvents([normalizedEvent])
 
-    return [...previous, incoming]
-  })
+  const normalizedHistory = seed.history
+    .map((entry) => normalizeClassificationEntry(entry))
+    .filter((entry): entry is ClassificationEntry => entry !== null)
+  setRawClassifications(normalizedHistory)
+
+  setGoals(seed.loadedGoals)
+  setGoalInput(seed.loadedGoals[0] ?? '')
 }
 
-export default function CalendarView() {
+function subscribeToEvents(
+  setRawEvents: Dispatch<SetStateAction<ActivityEvent[]>>,
+  setRawClassifications: Dispatch<SetStateAction<ClassificationEntry[]>>
+): Array<() => void> {
+  const onIncomingEvent = (event: ActivityWatchEvent): void => {
+    const normalizedEvent = normalizeActivityEvent(event)
+    if (!normalizedEvent) return
+    setRawEvents((previous) => upsertActivityEvent(previous, normalizedEvent))
+  }
+
+  const unsubscribeLatestEvent = window.api.onLatestActivityWatchEvent(onIncomingEvent)
+  const unsubscribeHeartbeat = window.api.onActivityWatchHeartbeat(onIncomingEvent)
+  const unsubscribeLatestClassification = window.api.onLatestClassification((entry) => {
+    const normalizedEntry = normalizeClassificationEntry(entry)
+    if (!normalizedEntry) return
+    setRawClassifications((previous) => [...previous, normalizedEntry])
+  })
+
+  return [unsubscribeLatestEvent, unsubscribeHeartbeat, unsubscribeLatestClassification]
+}
+
+export default function CalendarView(): JSX.Element {
   const [rawEvents, setRawEvents] = useState<ActivityEvent[]>([])
-  const [rawClassifications, setRawClassifications] = useState<CalendarClassificationEntry[]>([])
+  const [rawClassifications, setRawClassifications] = useState<ClassificationEntry[]>([])
   const [goals, setGoals] = useState<string[]>([])
   const [goalInput, setGoalInput] = useState('')
   const [saveMessage, setSaveMessage] = useState('')
@@ -72,45 +71,20 @@ export default function CalendarView() {
       window.api.getGoals()
     ]).then(([latestEvent, history, loadedGoals]) => {
       if (!isMounted) return
-
-      const normalizedEvent = normalizeActivityEvent(latestEvent)
-      if (normalizedEvent) {
-        setRawEvents([normalizedEvent])
-      }
-
-      const normalizedHistory = history
-        .map((entry) => normalizeClassification(entry))
-        .filter((entry): entry is CalendarClassificationEntry => entry !== null)
-      setRawClassifications(normalizedHistory)
-
-      setGoals(loadedGoals)
-      setGoalInput(loadedGoals[0] ?? '')
+      applySeedState(
+        { latestEvent, history, loadedGoals },
+        setRawEvents,
+        setRawClassifications,
+        setGoals,
+        setGoalInput
+      )
     })
 
-    const unsubscribeLatestEvent = window.api.onLatestActivityWatchEvent((event) => {
-      const normalizedEvent = normalizeActivityEvent(event)
-      if (!normalizedEvent) return
-      upsertEvent(setRawEvents, normalizedEvent)
-    })
-
-    const unsubscribeHeartbeat = window.api.onActivityWatchHeartbeat((event) => {
-      const normalizedEvent = normalizeActivityEvent(event)
-      if (!normalizedEvent) return
-      upsertEvent(setRawEvents, normalizedEvent)
-    })
-
-    const unsubscribeLatestClassification = window.api.onLatestClassification((entry) => {
-      const normalizedEntry = normalizeClassification(entry)
-      if (!normalizedEntry) return
-
-      setRawClassifications((previous) => [...previous, normalizedEntry])
-    })
+    const unsubscribers = subscribeToEvents(setRawEvents, setRawClassifications)
 
     return () => {
       isMounted = false
-      unsubscribeLatestEvent()
-      unsubscribeHeartbeat()
-      unsubscribeLatestClassification()
+      for (const unsubscribe of unsubscribers) unsubscribe()
     }
   }, [])
 
@@ -120,6 +94,11 @@ export default function CalendarView() {
     setGoals(savedGoals)
     setGoalInput(savedGoals[0] ?? '')
     setSaveMessage('Saved.')
+  }
+
+  const handleGoalInputChange = (value: string): void => {
+    setGoalInput(value)
+    if (saveMessage) setSaveMessage('')
   }
 
   return (
@@ -134,10 +113,7 @@ export default function CalendarView() {
           <input
             type="text"
             value={goalInput}
-            onChange={(event) => {
-              setGoalInput(event.target.value)
-              if (saveMessage) setSaveMessage('')
-            }}
+            onChange={(event) => handleGoalInputChange(event.target.value)}
             placeholder="Enter your weekly goal"
             className="w-full max-w-xl rounded border border-slate-300 px-3 py-2 text-sm"
           />

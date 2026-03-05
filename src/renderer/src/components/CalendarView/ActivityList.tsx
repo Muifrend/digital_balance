@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { ReactElement, useMemo } from 'react'
 import type { ActivityEvent } from './types'
 
 interface ActivityListProps {
@@ -16,7 +16,7 @@ function formatTimestamp(timestamp: string): string {
   })
 }
 
-export default function ActivityList({ events }: ActivityListProps) {
+export default function ActivityList({ events }: ActivityListProps): ReactElement {
   const sortedEvents = useMemo(() => {
     return [...events].sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
   }, [events])
