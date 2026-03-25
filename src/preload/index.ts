@@ -1,8 +1,28 @@
-import { contextBridge } from 'electron'
+import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
+import {
+  PIPELINE_GET_STATUS_CHANNEL,
+  PIPELINE_STATUS_CHANNEL,
+  type PipelineApi,
+  type PipelineStatus
+} from '../shared/pipeline'
 
-// Custom APIs for renderer
-const api = {}
+const api: { pipeline: PipelineApi } = {
+  pipeline: {
+    getStatus: (): Promise<PipelineStatus> => ipcRenderer.invoke(PIPELINE_GET_STATUS_CHANNEL),
+    onStatus: (listener) => {
+      const handleStatus = (_event: IpcRendererEvent, status: PipelineStatus): void => {
+        listener(status)
+      }
+
+      ipcRenderer.on(PIPELINE_STATUS_CHANNEL, handleStatus)
+
+      return () => {
+        ipcRenderer.removeListener(PIPELINE_STATUS_CHANNEL, handleStatus)
+      }
+    }
+  }
+}
 
 // Use `contextBridge` APIs to expose Electron APIs to
 // renderer only if context isolation is enabled, otherwise
