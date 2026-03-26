@@ -11,6 +11,17 @@ import {
   type PipelineStatus,
   type PipelineTrigger
 } from '../shared/pipeline'
+import {
+  ACTIVE_GOAL,
+  CLASSIFIER_VERSION,
+  OPENAI_MODEL,
+  PROMPT_VERSION,
+  buildClassificationRequest,
+  getClassificationRetryDelayMs,
+  loadOpenAiApiKey,
+  parseClassificationResponse,
+  type ParsedClassificationResponse
+} from './classification'
 import icon from '../../resources/icon.png?asset'
 
 const ACTIVITYWATCH_BASE_URL = new URL('http://localhost:5600')
@@ -92,12 +103,36 @@ type MinuteRowLookup = {
   id: number
 }
 
+type MinuteClassificationRow = {
+  id: number
+  timestamp: string
+  app: string | null
+  title: string | null
+  dominance: number | null
+  afk: number
+  needs_review: number
+}
+
 type PreviousAfkStreakRow = {
   afk_streak_minutes: number | null
 }
 
 type PendingClassificationCountRow = {
   count: number
+}
+
+type ClassificationJobRow = {
+  id: number
+  minute_timestamp: string
+  attempt_count: number
+}
+
+type ExistingClassificationRow = {
+  id: number
+}
+
+type NextPendingClassificationJobRow = {
+  next_attempt_at: string | null
 }
 
 type ReviewAssessment = {
@@ -181,6 +216,16 @@ type ClassificationJobPayload = {
   afk_logic_version: string
   review_flag_version: string
   classifier_queue_version: string
+  model_name: string
+  prompt_version: string
+  classifier_version: string
+  goal_version: string
+  goal_title: string
+  goal_description: string
+}
+
+type PersistMinutePayloadResult = {
+  queuedClassificationJob: boolean
 }
 
 let bucketDiscoveryTimeout: NodeJS.Timeout | null = null
@@ -196,15 +241,27 @@ let upsertMinuteIngestStatement: Database.Statement | null = null
 let upsertClassificationJobStatement: Database.Statement | null = null
 let deleteMinuteStatement: Database.Statement | null = null
 let deleteClassificationJobStatement: Database.Statement | null = null
+let deleteClassificationJobByIdStatement: Database.Statement | null = null
 let selectMinuteIdStatement: Database.Statement | null = null
+let selectMinuteForClassificationStatement: Database.Statement | null = null
 let selectPreviousAfkStreakStatement: Database.Statement | null = null
 let countPendingClassificationJobsStatement: Database.Statement | null = null
 let prunePendingClassificationJobsStatement: Database.Statement | null = null
+let resetProcessingClassificationJobsStatement: Database.Statement | null = null
+let selectDueClassificationJobStatement: Database.Statement | null = null
+let selectNextPendingClassificationJobStatement: Database.Statement | null = null
+let markClassificationJobProcessingStatement: Database.Statement | null = null
+let markClassificationJobFailedStatement: Database.Statement | null = null
+let selectExistingClassificationStatement: Database.Statement | null = null
+let insertClassificationStatement: Database.Statement | null = null
 let persistMinutePayloadTransaction:
-  | ((payload: MinutePersistencePayload, logDatabase: boolean) => void)
+  | ((payload: MinutePersistencePayload, logDatabase: boolean) => PersistMinutePayloadResult)
   | null = null
 let minuteReconciliationQueue: Promise<boolean> = Promise.resolve(true)
 let pipelineStatus: PipelineStatus = createInitialPipelineStatus()
+let openAiApiKey: string | null = null
+let classifying = false
+let classificationRetryTimeout: NodeJS.Timeout | null = null
 
 let awServerProcess: ChildProcessWithoutNullStreams | null = null
 let awWatcherWindowProcess: ChildProcessWithoutNullStreams | null = null
@@ -285,6 +342,7 @@ const CREATE_CLASSIFICATION_JOBS_TABLE_SQL = `
     classifier_version TEXT,
     prompt_version TEXT,
     model_name TEXT,
+    goal_version TEXT,
     last_error TEXT,
     next_attempt_at TEXT,
     created_at TEXT DEFAULT (datetime('now')),
@@ -295,6 +353,40 @@ const CREATE_CLASSIFICATION_JOBS_TABLE_SQL = `
 const CREATE_CLASSIFICATION_JOBS_INDEX_SQL = `
   CREATE INDEX IF NOT EXISTS idx_classification_jobs_status
   ON classification_jobs(status, next_attempt_at, created_at);
+`
+
+const CREATE_CLASSIFICATIONS_TABLE_SQL = `
+  CREATE TABLE IF NOT EXISTS classifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    minute_id INTEGER NOT NULL REFERENCES minutes(id),
+    minute_timestamp TEXT NOT NULL,
+    on_task INTEGER NOT NULL,
+    confidence REAL NOT NULL,
+    reasoning TEXT,
+    corrected INTEGER DEFAULT 0,
+    model_name TEXT NOT NULL,
+    prompt_version TEXT NOT NULL,
+    classifier_version TEXT NOT NULL,
+    goal_version TEXT NOT NULL,
+    goal_title TEXT NOT NULL,
+    goal_description TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+`
+
+const CREATE_CLASSIFICATIONS_MINUTE_INDEX_SQL = `
+  CREATE INDEX IF NOT EXISTS idx_classifications_minute_created
+  ON classifications(minute_id, created_at);
+`
+
+const CREATE_CLASSIFICATIONS_VERSION_INDEX_SQL = `
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_classifications_minute_version
+  ON classifications(minute_id, model_name, prompt_version, classifier_version, goal_version, corrected);
+`
+
+const CREATE_CLASSIFICATIONS_TIMESTAMP_VERSION_INDEX_SQL = `
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_classifications_timestamp_version
+  ON classifications(minute_timestamp, model_name, prompt_version, classifier_version, goal_version, corrected);
 `
 
 function getActivityWatchPlatform(): string {
@@ -513,7 +605,9 @@ function runDatabaseMigrations(databaseInstance: Database.Database): void {
         addColumnIfMissing(databaseInstance, 'minutes', 'afk_logic_version', 'TEXT')
         addColumnIfMissing(databaseInstance, 'minutes', 'review_flag_version', 'TEXT')
         addColumnIfMissing(databaseInstance, 'minutes', 'updated_at', 'TEXT')
-        databaseInstance.exec("UPDATE minutes SET updated_at = datetime('now') WHERE updated_at IS NULL")
+        databaseInstance.exec(
+          "UPDATE minutes SET updated_at = datetime('now') WHERE updated_at IS NULL"
+        )
       }
     },
     {
@@ -529,6 +623,23 @@ function runDatabaseMigrations(databaseInstance: Database.Database): void {
       run: (): void => {
         databaseInstance.exec(CREATE_CLASSIFICATION_JOBS_TABLE_SQL)
         databaseInstance.exec(CREATE_CLASSIFICATION_JOBS_INDEX_SQL)
+      }
+    },
+    {
+      id: 5,
+      name: 'create_classifications_table',
+      run: (): void => {
+        databaseInstance.exec(CREATE_CLASSIFICATIONS_TABLE_SQL)
+        databaseInstance.exec(CREATE_CLASSIFICATIONS_MINUTE_INDEX_SQL)
+        databaseInstance.exec(CREATE_CLASSIFICATIONS_VERSION_INDEX_SQL)
+        databaseInstance.exec(CREATE_CLASSIFICATIONS_TIMESTAMP_VERSION_INDEX_SQL)
+      }
+    },
+    {
+      id: 6,
+      name: 'expand_classification_jobs_table',
+      run: (): void => {
+        addColumnIfMissing(databaseInstance, 'classification_jobs', 'goal_version', 'TEXT')
       }
     }
   ]
@@ -665,18 +776,20 @@ function initializeDatabase(): void {
         classifier_version,
         prompt_version,
         model_name,
+        goal_version,
         last_error,
         next_attempt_at,
         updated_at
       )
-      VALUES (?, 'pending', 0, ?, NULL, NULL, NULL, NULL, NULL, datetime('now'))
+      VALUES (?, 'pending', 0, ?, ?, ?, ?, ?, NULL, NULL, datetime('now'))
       ON CONFLICT(minute_timestamp) DO UPDATE SET
         status = 'pending',
         attempt_count = 0,
         payload_json = excluded.payload_json,
-        classifier_version = NULL,
-        prompt_version = NULL,
-        model_name = NULL,
+        classifier_version = excluded.classifier_version,
+        prompt_version = excluded.prompt_version,
+        model_name = excluded.model_name,
+        goal_version = excluded.goal_version,
         last_error = NULL,
         next_attempt_at = NULL,
         updated_at = datetime('now')
@@ -686,7 +799,15 @@ function initializeDatabase(): void {
     deleteClassificationJobStatement = database.prepare(
       'DELETE FROM classification_jobs WHERE minute_timestamp = ?'
     )
+    deleteClassificationJobByIdStatement = database.prepare(
+      'DELETE FROM classification_jobs WHERE id = ?'
+    )
     selectMinuteIdStatement = database.prepare('SELECT id FROM minutes WHERE timestamp = ?')
+    selectMinuteForClassificationStatement = database.prepare(`
+      SELECT id, timestamp, app, title, dominance, afk, needs_review
+      FROM minutes
+      WHERE timestamp = ?
+    `)
     selectPreviousAfkStreakStatement = database.prepare(
       'SELECT afk_streak_minutes FROM minute_ingest WHERE minute_timestamp = ?'
     )
@@ -703,9 +824,95 @@ function initializeDatabase(): void {
         LIMIT ?
       )
     `)
+    resetProcessingClassificationJobsStatement = database.prepare(`
+      UPDATE classification_jobs
+      SET status = 'pending',
+          next_attempt_at = NULL,
+          updated_at = datetime('now')
+      WHERE status = 'processing'
+    `)
+    selectDueClassificationJobStatement = database.prepare(`
+      SELECT id, minute_timestamp, attempt_count
+      FROM classification_jobs
+      WHERE status = 'pending'
+        AND (next_attempt_at IS NULL OR next_attempt_at <= datetime('now'))
+      ORDER BY
+        CASE WHEN next_attempt_at IS NULL THEN 0 ELSE 1 END ASC,
+        next_attempt_at ASC,
+        created_at ASC,
+        id ASC
+      LIMIT 1
+    `)
+    selectNextPendingClassificationJobStatement = database.prepare(`
+      SELECT next_attempt_at
+      FROM classification_jobs
+      WHERE status = 'pending'
+      ORDER BY
+        CASE WHEN next_attempt_at IS NULL THEN 0 ELSE 1 END ASC,
+        next_attempt_at ASC,
+        created_at ASC,
+        id ASC
+      LIMIT 1
+    `)
+    markClassificationJobProcessingStatement = database.prepare(`
+      UPDATE classification_jobs
+      SET status = 'processing',
+          updated_at = datetime('now')
+      WHERE id = ?
+        AND status = 'pending'
+    `)
+    markClassificationJobFailedStatement = database.prepare(`
+      UPDATE classification_jobs
+      SET status = 'pending',
+          attempt_count = ?,
+          last_error = ?,
+          next_attempt_at = ?,
+          classifier_version = ?,
+          prompt_version = ?,
+          model_name = ?,
+          goal_version = ?,
+          updated_at = datetime('now')
+      WHERE id = ?
+    `)
+    selectExistingClassificationStatement = database.prepare(`
+      SELECT id
+      FROM classifications
+      WHERE minute_timestamp = ?
+        AND model_name = ?
+        AND prompt_version = ?
+        AND classifier_version = ?
+        AND goal_version = ?
+        AND corrected = 0
+      LIMIT 1
+    `)
+    insertClassificationStatement = database.prepare(`
+      INSERT OR IGNORE INTO classifications (
+        minute_id,
+        minute_timestamp,
+        on_task,
+        confidence,
+        reasoning,
+        corrected,
+        model_name,
+        prompt_version,
+        classifier_version,
+        goal_version,
+        goal_title,
+        goal_description
+      )
+      VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)
+    `)
+
+    const resetProcessingJobsResult =
+      resetProcessingClassificationJobsStatement.run() as DatabaseWriteResult
+    if (resetProcessingJobsResult.changes > 0) {
+      console.log(
+        `[db] reset ${resetProcessingJobsResult.changes} stale classification jobs to pending`
+      )
+    }
 
     const transaction = database.transaction(
-      (payload: MinutePersistencePayload, logDatabase: boolean): void => {
+      (payload: MinutePersistencePayload, logDatabase: boolean): PersistMinutePayloadResult => {
         if (
           !upsertMinuteStatement ||
           !upsertMinuteIngestStatement ||
@@ -713,6 +920,7 @@ function initializeDatabase(): void {
           !deleteMinuteStatement ||
           !deleteClassificationJobStatement ||
           !selectMinuteIdStatement ||
+          !selectExistingClassificationStatement ||
           !countPendingClassificationJobsStatement ||
           !prunePendingClassificationJobsStatement
         ) {
@@ -773,24 +981,45 @@ function initializeDatabase(): void {
         )
 
         const classificationJobPayload = buildClassificationJobPayload(payload)
+        const currentMinute = payload.record
+          ? ((selectMinuteIdStatement.get(payload.minuteTimestamp) as
+              | MinuteRowLookup
+              | undefined) ?? null)
+          : null
+        const existingClassification =
+          currentMinute && classificationJobPayload
+            ? ((selectExistingClassificationStatement.get(
+                payload.minuteTimestamp,
+                OPENAI_MODEL,
+                PROMPT_VERSION,
+                CLASSIFIER_VERSION,
+                ACTIVE_GOAL.version
+              ) as ExistingClassificationRow | undefined) ?? null)
+            : null
+        let queuedClassificationJob = false
 
-        if (classificationJobPayload) {
+        if (classificationJobPayload && currentMinute && !existingClassification) {
           upsertClassificationJobStatement.run(
             payload.minuteTimestamp,
-            JSON.stringify(classificationJobPayload)
+            JSON.stringify(classificationJobPayload),
+            CLASSIFIER_VERSION,
+            PROMPT_VERSION,
+            OPENAI_MODEL,
+            ACTIVE_GOAL.version
           )
           prunePendingClassificationJobs()
-        } else if (payload.status !== 'no_winner') {
+          queuedClassificationJob = true
+        } else {
           deleteClassificationJobStatement.run(payload.minuteTimestamp)
         }
 
         if (!payload.record) {
           if (payload.status === 'no_winner') {
-            return
+            return { queuedClassificationJob }
           }
 
           deleteMinuteStatement.run(payload.minuteTimestamp)
-          return
+          return { queuedClassificationJob }
         }
 
         if (logDatabase) {
@@ -802,11 +1031,13 @@ function initializeDatabase(): void {
             )
           }
         }
+
+        return { queuedClassificationJob }
       }
     )
 
     persistMinutePayloadTransaction = (payload, logDatabase) => {
-      transaction(payload, logDatabase)
+      return transaction(payload, logDatabase)
     }
 
     prunePendingClassificationJobs()
@@ -818,10 +1049,19 @@ function initializeDatabase(): void {
     upsertClassificationJobStatement = null
     deleteMinuteStatement = null
     deleteClassificationJobStatement = null
+    deleteClassificationJobByIdStatement = null
     selectMinuteIdStatement = null
+    selectMinuteForClassificationStatement = null
     selectPreviousAfkStreakStatement = null
     countPendingClassificationJobsStatement = null
     prunePendingClassificationJobsStatement = null
+    resetProcessingClassificationJobsStatement = null
+    selectDueClassificationJobStatement = null
+    selectNextPendingClassificationJobStatement = null
+    markClassificationJobProcessingStatement = null
+    markClassificationJobFailedStatement = null
+    selectExistingClassificationStatement = null
+    insertClassificationStatement = null
     persistMinutePayloadTransaction = null
   }
 }
@@ -871,16 +1111,27 @@ function getDominance(durationSeconds: number): number {
   return Number(Math.max(0, Math.min(durationSeconds / 60, 1)).toFixed(2))
 }
 
-function isClassificationCandidate(record: MinuteRecord | null): record is MinuteRecord {
-  return Boolean(
-    record && (record.app !== null || record.title !== null || record.dominance !== null)
-  )
+function buildMinuteRecordFromClassificationRow(row: MinuteClassificationRow): MinuteRecord {
+  return {
+    timestamp: row.timestamp,
+    app: row.app,
+    title: row.title,
+    dominance: row.dominance,
+    afk: row.afk === 1
+  }
+}
+
+function isClassificationEligible(
+  record: MinuteRecord | null,
+  needsReview: boolean
+): record is MinuteRecord & { app: string } {
+  return Boolean(record && record.app !== null && !record.afk && !needsReview)
 }
 
 function buildClassificationJobPayload(
   payload: MinutePersistencePayload
 ): ClassificationJobPayload | null {
-  if (!isClassificationCandidate(payload.record)) {
+  if (!isClassificationEligible(payload.record, payload.needsReview)) {
     return null
   }
 
@@ -905,7 +1156,13 @@ function buildClassificationJobPayload(
     pipeline_version: PIPELINE_VERSION,
     afk_logic_version: AFK_LOGIC_VERSION,
     review_flag_version: REVIEW_FLAG_VERSION,
-    classifier_queue_version: CLASSIFIER_QUEUE_VERSION
+    classifier_queue_version: CLASSIFIER_QUEUE_VERSION,
+    model_name: OPENAI_MODEL,
+    prompt_version: PROMPT_VERSION,
+    classifier_version: CLASSIFIER_VERSION,
+    goal_version: ACTIVE_GOAL.version,
+    goal_title: ACTIVE_GOAL.title,
+    goal_description: ACTIVE_GOAL.description
   }
 }
 
@@ -945,19 +1202,100 @@ function getPreviousAfkStreak(minuteTimestamp: string): number {
   return previousRow?.afk_streak_minutes ?? 0
 }
 
+function hasDueClassificationJob(): boolean {
+  if (!database || !selectDueClassificationJobStatement) {
+    return false
+  }
+
+  const dueJob = selectDueClassificationJobStatement.get() as ClassificationJobRow | undefined
+  return Boolean(dueJob)
+}
+
+function clearClassificationRetryTimeout(): void {
+  if (classificationRetryTimeout) {
+    clearTimeout(classificationRetryTimeout)
+    classificationRetryTimeout = null
+  }
+}
+
+function parseSqliteDateTime(value: string): Date | null {
+  const parsed = Date.parse(value.includes('T') ? value : `${value.replace(' ', 'T')}Z`)
+  return Number.isNaN(parsed) ? null : new Date(parsed)
+}
+
+function formatSqliteDateTime(date: Date): string {
+  const iso = date.toISOString()
+  return iso.slice(0, 19).replace('T', ' ')
+}
+
+function scheduleNextClassificationWorkerRun(): void {
+  clearClassificationRetryTimeout()
+
+  if (!database || !selectNextPendingClassificationJobStatement || !openAiApiKey) {
+    return
+  }
+
+  const nextPendingJob = selectNextPendingClassificationJobStatement.get() as
+    | NextPendingClassificationJobRow
+    | undefined
+
+  if (!nextPendingJob) {
+    return
+  }
+
+  if (!nextPendingJob.next_attempt_at) {
+    queueMicrotask(() => {
+      void runClassificationWorker()
+    })
+    return
+  }
+
+  const nextAttemptDate = parseSqliteDateTime(nextPendingJob.next_attempt_at)
+  if (!nextAttemptDate) {
+    queueMicrotask(() => {
+      void runClassificationWorker()
+    })
+    return
+  }
+
+  const delayMs = Math.max(0, nextAttemptDate.getTime() - Date.now())
+  classificationRetryTimeout = setTimeout(() => {
+    classificationRetryTimeout = null
+    void runClassificationWorker()
+  }, delayMs)
+}
+
+function resolveProjectRoot(): string {
+  const candidates = [process.cwd(), app.getAppPath(), join(__dirname, '../..')]
+  return candidates.find((candidate) => existsSync(join(candidate, '.env'))) ?? candidates[0]
+}
+
+function initializeOpenAiApiKey(): void {
+  openAiApiKey = loadOpenAiApiKey(resolveProjectRoot())
+
+  if (!openAiApiKey) {
+    console.warn('[classify] OPENAI_API_KEY missing or blank. Classification disabled.')
+  }
+}
+
 function persistMinutePayload(payload: MinutePersistencePayload, logDatabase: boolean): void {
   if (!database || !persistMinutePayloadTransaction) {
     return
   }
 
   try {
-    persistMinutePayloadTransaction(payload, logDatabase)
+    const result = persistMinutePayloadTransaction(payload, logDatabase)
+    if (result.queuedClassificationJob || hasDueClassificationJob()) {
+      void runClassificationWorker()
+    }
   } catch (error) {
     console.error(`[db] Failed to persist minute payload ${payload.minuteTimestamp}:`, error)
   }
 }
 
 function closeDatabase(): void {
+  clearClassificationRetryTimeout()
+
   if (!database) {
     return
   }
@@ -972,10 +1310,19 @@ function closeDatabase(): void {
     upsertClassificationJobStatement = null
     deleteMinuteStatement = null
     deleteClassificationJobStatement = null
+    deleteClassificationJobByIdStatement = null
     selectMinuteIdStatement = null
+    selectMinuteForClassificationStatement = null
     selectPreviousAfkStreakStatement = null
     countPendingClassificationJobsStatement = null
     prunePendingClassificationJobsStatement = null
+    resetProcessingClassificationJobsStatement = null
+    selectDueClassificationJobStatement = null
+    selectNextPendingClassificationJobStatement = null
+    markClassificationJobProcessingStatement = null
+    markClassificationJobFailedStatement = null
+    selectExistingClassificationStatement = null
+    insertClassificationStatement = null
     persistMinutePayloadTransaction = null
     database = null
   }
@@ -1086,8 +1433,241 @@ function clearProjectionTables(options?: RebuildMinutesProjectionOptions): void 
   }
 }
 
+function relinkClassificationsToCurrentMinutes(options?: RebuildMinutesProjectionOptions): void {
+  if (!database) {
+    return
+  }
+
+  const range = buildTimestampRangeClause('minute_timestamp', options)
+  const deleteClause = range.clause
+    ? `${range.clause} AND NOT EXISTS (
+        SELECT 1
+        FROM minutes
+        WHERE minutes.timestamp = classifications.minute_timestamp
+      )`
+    : `WHERE NOT EXISTS (
+        SELECT 1
+        FROM minutes
+        WHERE minutes.timestamp = classifications.minute_timestamp
+      )`
+
+  database.prepare(`DELETE FROM classifications ${deleteClause}`).run(...range.params)
+
+  const updateClause = range.clause
+    ? `${range.clause} AND EXISTS (
+        SELECT 1
+        FROM minutes
+        WHERE minutes.timestamp = classifications.minute_timestamp
+      )`
+    : `WHERE EXISTS (
+        SELECT 1
+        FROM minutes
+        WHERE minutes.timestamp = classifications.minute_timestamp
+      )`
+
+  database
+    .prepare(
+      `
+        UPDATE classifications
+        SET minute_id = (
+          SELECT id
+          FROM minutes
+          WHERE minutes.timestamp = classifications.minute_timestamp
+        )
+        ${updateClause}
+      `
+    )
+    .run(...range.params)
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function requestMinuteClassification(
+  record: MinuteRecord & { app: string }
+): Promise<ParsedClassificationResponse> {
+  if (!openAiApiKey) {
+    throw new Error('OPENAI_API_KEY missing or blank')
+  }
+
+  const { body } = buildClassificationRequest({
+    app: record.app,
+    title: record.title,
+    dominance: record.dominance,
+    afk: record.afk
+  })
+
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${openAiApiKey}`
+    },
+    body: JSON.stringify(body)
+  })
+
+  const responseText = await response.text()
+  if (!response.ok) {
+    throw new Error(
+      `OpenAI returned ${response.status}: ${responseText.slice(0, 300) || 'empty response body'}`
+    )
+  }
+
+  let responseJson: unknown
+  try {
+    responseJson = JSON.parse(responseText)
+  } catch {
+    throw new Error('OpenAI returned invalid JSON for chat completions response')
+  }
+
+  const choices = (responseJson as { choices?: Array<{ message?: { content?: unknown } }> }).choices
+  const content = choices?.[0]?.message?.content
+  if (typeof content !== 'string') {
+    throw new Error('OpenAI response missing choices[0].message.content')
+  }
+
+  const parsedClassification = parseClassificationResponse(content)
+  if (!parsedClassification) {
+    throw new Error('Failed to parse classification JSON from OpenAI response')
+  }
+
+  return parsedClassification
+}
+
+function markClassificationJobFailed(job: ClassificationJobRow, error: unknown): void {
+  if (!markClassificationJobFailedStatement) {
+    return
+  }
+
+  const nextAttemptCount = job.attempt_count + 1
+  const nextAttemptAt = formatSqliteDateTime(
+    new Date(Date.now() + getClassificationRetryDelayMs(nextAttemptCount))
+  )
+  const errorMessage = error instanceof Error ? error.message : String(error)
+
+  try {
+    markClassificationJobFailedStatement.run(
+      nextAttemptCount,
+      errorMessage,
+      nextAttemptAt,
+      CLASSIFIER_VERSION,
+      PROMPT_VERSION,
+      OPENAI_MODEL,
+      ACTIVE_GOAL.version,
+      job.id
+    )
+    console.warn(`[classify] Failed for ${job.minute_timestamp}: ${errorMessage}`)
+  } catch (updateError) {
+    console.error(`[classify] Failed to reschedule job ${job.id}:`, updateError)
+  }
+}
+
+async function runClassificationWorker(): Promise<void> {
+  if (
+    classifying ||
+    !database ||
+    !openAiApiKey ||
+    !selectDueClassificationJobStatement ||
+    !markClassificationJobProcessingStatement ||
+    !deleteClassificationJobByIdStatement ||
+    !selectMinuteForClassificationStatement ||
+    !selectExistingClassificationStatement ||
+    !insertClassificationStatement
+  ) {
+    return
+  }
+
+  classifying = true
+  clearClassificationRetryTimeout()
+
+  try {
+    while (
+      database &&
+      openAiApiKey &&
+      selectDueClassificationJobStatement &&
+      markClassificationJobProcessingStatement &&
+      deleteClassificationJobByIdStatement &&
+      selectMinuteForClassificationStatement &&
+      selectExistingClassificationStatement &&
+      insertClassificationStatement
+    ) {
+      const job = selectDueClassificationJobStatement.get() as ClassificationJobRow | undefined
+      if (!job) {
+        break
+      }
+
+      const claimedJob = markClassificationJobProcessingStatement.run(job.id) as DatabaseWriteResult
+      if (claimedJob.changes === 0) {
+        continue
+      }
+
+      try {
+        const minuteRow = selectMinuteForClassificationStatement.get(job.minute_timestamp) as
+          | MinuteClassificationRow
+          | undefined
+
+        if (!minuteRow) {
+          deleteClassificationJobByIdStatement.run(job.id)
+          continue
+        }
+
+        const record = buildMinuteRecordFromClassificationRow(minuteRow)
+        if (!isClassificationEligible(record, minuteRow.needs_review === 1)) {
+          deleteClassificationJobByIdStatement.run(job.id)
+          continue
+        }
+
+        const existingClassification = selectExistingClassificationStatement.get(
+          minuteRow.timestamp,
+          OPENAI_MODEL,
+          PROMPT_VERSION,
+          CLASSIFIER_VERSION,
+          ACTIVE_GOAL.version
+        ) as ExistingClassificationRow | undefined
+
+        if (existingClassification) {
+          deleteClassificationJobByIdStatement.run(job.id)
+          continue
+        }
+
+        const classification = await requestMinuteClassification(record)
+        const insertedClassification = insertClassificationStatement.run(
+          minuteRow.id,
+          minuteRow.timestamp,
+          classification.onTask ? 1 : 0,
+          classification.confidence,
+          classification.reasoning,
+          OPENAI_MODEL,
+          PROMPT_VERSION,
+          CLASSIFIER_VERSION,
+          ACTIVE_GOAL.version,
+          ACTIVE_GOAL.title,
+          ACTIVE_GOAL.description
+        ) as DatabaseWriteResult
+
+        deleteClassificationJobByIdStatement.run(job.id)
+
+        if (insertedClassification.changes > 0) {
+          console.log(
+            `[classify] ${minuteRow.timestamp} -> on_task: ${classification.onTask} (confidence: ${classification.confidence.toFixed(2)}) - ${classification.reasoning ?? 'No reasoning provided'}`
+          )
+        }
+      } catch (error) {
+        markClassificationJobFailed(job, error)
+      }
+    }
+  } finally {
+    classifying = false
+
+    if (hasDueClassificationJob()) {
+      queueMicrotask(() => {
+        void runClassificationWorker()
+      })
+    } else {
+      scheduleNextClassificationWorkerRun()
+    }
+  }
 }
 
 function runProcessCheck(command: string, args: string[]): Promise<ProcessCheckResult> {
@@ -1352,6 +1932,16 @@ function scheduleBucketDiscovery(delayMs = 0): void {
   }, delayMs)
 }
 
+function scheduleActivityWatchRecovery(delayMs = ACTIVITYWATCH_RETRY_MS): void {
+  windowBucketId = null
+  afkBucketId = null
+  stopMinuteScheduler()
+
+  void startActivityWatchOnLaunch().finally(() => {
+    scheduleBucketDiscovery(delayMs)
+  })
+}
+
 async function fetchBuckets(): Promise<ActivityWatchBucketsResponse | null> {
   const url = buildActivityWatchUrl('/api/0/buckets')
 
@@ -1401,10 +1991,7 @@ function stopMinuteScheduler(): void {
 }
 
 function restartBucketDiscovery(): void {
-  windowBucketId = null
-  afkBucketId = null
-  stopMinuteScheduler()
-  scheduleBucketDiscovery(ACTIVITYWATCH_RETRY_MS)
+  scheduleActivityWatchRecovery(ACTIVITYWATCH_RETRY_MS)
 }
 
 function emitMinutePayload(payload: MinutePersistencePayload, logRecord: boolean): void {
@@ -1659,6 +2246,7 @@ function rebuildMinutesProjection(options?: RebuildMinutesProjectionOptions): vo
       previousAfkStreak = payload.afkStreakMinutes
     }
 
+    relinkClassificationsToCurrentMinutes(options)
     completePipelineReconciliation('manual', rangeStart, rangeEnd, startedAt)
   } catch (error) {
     const errorMessage =
@@ -1787,7 +2375,7 @@ async function discoverActivityWatchBuckets(): Promise<void> {
   try {
     const buckets = await fetchBuckets()
     if (!buckets) {
-      scheduleBucketDiscovery(ACTIVITYWATCH_RETRY_MS)
+      scheduleActivityWatchRecovery(ACTIVITYWATCH_RETRY_MS)
       return
     }
 
@@ -1807,7 +2395,7 @@ async function discoverActivityWatchBuckets(): Promise<void> {
         `[activitywatch] Missing bucket(s): ${missingBuckets.join(', ')}. Retrying in 5s.`
       )
 
-      scheduleBucketDiscovery(ACTIVITYWATCH_RETRY_MS)
+      scheduleActivityWatchRecovery(ACTIVITYWATCH_RETRY_MS)
       return
     }
 
@@ -1935,6 +2523,8 @@ app.whenReady().then(() => {
   ipcMain.handle(PIPELINE_GET_STATUS_CHANNEL, () => getPipelineStatusSnapshot())
 
   initializeDatabase()
+  initializeOpenAiApiKey()
+  void runClassificationWorker()
 
   void startActivityWatchOnLaunch().finally(() => {
     scheduleBucketDiscovery()

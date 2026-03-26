@@ -27,10 +27,18 @@ The current design is intentionally main-process centric: the renderer is for pr
 - minute derivation logic
 - SQLite initialization and migrations
 - projection rebuilding support
-- classification queue production and pruning
+- classification queue production, consumption, retry scheduling, and pruning
 - pipeline status state and IPC emission
 
 This file is doing a lot by design right now. It is the primary place to look for behavior, but it is also the most likely refactor target as the product grows.
+
+`src/main/classification.ts` now holds the focused OpenAI helper logic for:
+
+- repo-root `.env` API key loading
+- prompt constants and placeholder goal metadata
+- chat completion request construction
+- model-response parsing and validation
+- retry delay calculation
 
 Soon:
 - activitywatch/ for server/watcher startup and bucket/event fetching
@@ -205,16 +213,38 @@ Skipped `id` values are normal and are not a sign of lost minute data.
 
 ### `classification_jobs`
 
-`classification_jobs` is a producer-side queue for future enrichment or LLM classification work.
+`classification_jobs` is the operational work queue for automatic LLM classification.
 
 Current state:
 
-- the app produces jobs
-- the consumer is not built yet
+- jobs are created only for eligible summary minutes
+- a single main-process consumer drains the queue asynchronously
+- queue rows are operational and are deleted on success or invalidation
+- transient failures are retried with backoff
 - queue growth is capped at 10,000 pending rows
 - oldest pending jobs are pruned when the cap is exceeded
 
-This is a temporary safety measure until the consumer exists.
+The queue is not the durable history. It exists only to manage work that still needs to be attempted.
+
+### `classifications`
+
+`classifications` stores durable classifier output.
+
+Each row captures:
+
+- the linked minute row
+- the minute timestamp
+- `on_task`
+- `confidence`
+- `reasoning`
+- version metadata for model, prompt, classifier, and goal
+- whether the row was manually corrected
+
+Important behavior:
+
+- automatic classifications are append-only across version changes
+- the current version tuple is used to prevent duplicate automatic classifications
+- projection rebuilds relink stored classifications back to current `minutes.id` values using `minute_timestamp`
 
 ## Rebuild Strategy
 
@@ -225,6 +255,7 @@ Current intent:
 - `minute_ingest` is the canonical minute store
 - `minutes` is rebuildable
 - `classification_jobs` payloads can also be regenerated from canonical data
+- existing `classifications` rows can be preserved while minute projections are rebuilt and relinked
 
 There is an internal rebuild function in the main process that recomputes projections from `minute_ingest` without querying ActivityWatch again.
 
@@ -234,6 +265,7 @@ This is important because it allows future logic changes to:
 - AFK thresholds
 - `needs_review` heuristics
 - classification payloads
+- classifier prompt/model versions
 
 without treating historical projections as unrecoverable truth.
 
@@ -280,7 +312,8 @@ These choices were made on purpose:
 - **Canonical ingest + projection split:** minute input data and display/query data are not the same thing.
 - **Minimal IPC surface:** renderer gets status, not unrestricted database access.
 - **Dynamic ActivityWatch discovery:** bucket IDs are discovered at runtime rather than baked into code.
-- **Queue producer before consumer:** classification production is in place before the worker exists, but bounded by a queue cap.
+- **Async queue consumer:** classification runs outside the minute ingestion path and never blocks startup or reconciliation.
+- **Versioned classifier output:** automatic classifications are stored with model/prompt/goal versions instead of overwriting prior outputs.
 
 ## Known Limits And Future Refactor Targets
 
@@ -288,14 +321,14 @@ This architecture is working, but there are known boundaries:
 
 - `src/main/index.ts` currently owns too many responsibilities
 - `minute_ingest` is canonical but not immutable
-- `classification_jobs` exists before a consumer
+- classification currently depends on a repo-root `.env` file and a single hardcoded placeholder goal
 - rebuild is internal and not yet surfaced as a formal maintenance action
 - pipeline status is UI-visible, but pipeline control is not yet user-facing
 
 Likely future refactors:
 
 - split main-process concerns into dedicated modules
-- add a real classification worker
+- move the classification worker behind a more explicit service boundary
 - decide whether `minute_ingest` should remain row-per-minute or evolve into a revision/history model
 - add operational diagnostics for DB path, DB initialization success, and persistence health
 
@@ -308,5 +341,6 @@ When debugging, use this mental model:
 - Missing summary row problem: check `minute_ingest` first, then `minutes`
 - UI visibility problem: check `PipelineStatus` flow through main, preload, and renderer
 - Classification backlog problem: check `classification_jobs` size and pruning
+- Missing or stale classification problem: check `classification_jobs` first, then `classifications`
 
 If future behavior changes, update this document alongside the code so the architecture stays explicit.
