@@ -18,32 +18,37 @@ The current design is intentionally main-process centric: the renderer is for pr
 
 ### Main Process
 
-`src/main/index.ts` is the system core. It currently owns:
+`src/main/index.ts` is now the composition root for the Electron main process. It owns:
 
 - Electron app startup
-- bundled ActivityWatch process management
-- ActivityWatch connectivity checks and bucket discovery
-- minute scheduler and reconciliation loop
-- minute derivation logic
-- SQLite initialization and migrations
-- projection rebuilding support
-- classification queue production, consumption, retry scheduling, and pruning
-- pipeline status state and IPC emission
+- Browser window creation
+- IPC registration for pipeline status
+- service construction and startup order
+- shutdown cleanup
 
-This file is doing a lot by design right now. It is the primary place to look for behavior, but it is also the most likely refactor target as the product grows.
+The operational behavior now lives in focused modules:
 
-`src/main/classification.ts` now holds the focused OpenAI helper logic for:
+- `src/main/activitywatch/service.ts` owns bundled ActivityWatch process management, health checks, bucket discovery, and event fetching
+- `src/main/pipeline/service.ts` owns pipeline status state, minute scheduling, reconciliation, and recovery flow
+- `src/main/pipeline/minute.ts` owns pure minute-derivation logic and related helper types
+- `src/main/db/service.ts` is the DB composition root that wires together the DB internals and exposes the stable `DatabaseService` API
+
+The DB internals are now split further:
+
+- `src/main/db/context.ts` holds shared mutable DB runtime state and typed prepared-statement shapes
+- `src/main/db/migrations.ts` owns schema creation and migration helpers
+- `src/main/db/statements.ts` owns prepared-statement creation
+- `src/main/db/persistence.ts` owns minute persistence and previous-AFK-streak lookups
+- `src/main/db/projection-rebuild.ts` owns projection rebuild logic from canonical ingest rows
+- `src/main/db/classification-queue.ts` owns automatic classification queue building, retry scheduling, and worker execution
+
+`src/main/classification.ts` holds the focused OpenAI helper logic for:
 
 - repo-root `.env` API key loading
 - prompt constants and placeholder goal metadata
 - chat completion request construction
 - model-response parsing and validation
 - retry delay calculation
-
-Soon:
-- activitywatch/ for server/watcher startup and bucket/event fetching
-- pipeline/ for reconciliation, minute derivation, and status
-- db/ for migrations, persistence, rebuilds, and queue handling
 
 ### Preload
 
@@ -150,12 +155,8 @@ Current AFK behavior:
 
 ### Empty And Skipped Minutes
 
-- If a minute has zero window events, the app writes a true null minute:
-  - `app = null`
-  - `title = null`
-  - `dominance = null`
-  - `afk = true`
-- If window events exist but no winner can be derived, the app skips the `minutes` projection row for that minute rather than writing a null summary
+- If a minute has zero window events, the app still writes an `empty_window` canonical ingest row in `minute_ingest`, but it skips the `minutes` projection row.
+- If window events exist but no winner can be derived, the app also skips the `minutes` projection row rather than writing a null summary.
 
 ## Persistence Model
 
@@ -168,6 +169,13 @@ On Linux this is typically:
 - `~/.config/digital_balance/digital_balance.db`
 
 SQLite WAL mode is enabled.
+
+The DB layer is intentionally split into a thin public facade plus internal helpers:
+
+- `src/main/db/service.ts` keeps the stable interface consumed by the rest of the app
+- migrations, statement setup, persistence, rebuilds, and classification queue behavior live in dedicated internal modules under `src/main/db/`
+
+This keeps the rest of the main process insulated from SQLite implementation detail while still avoiding a broader public service split.
 
 ### `minute_ingest`
 
@@ -226,6 +234,11 @@ Current state:
 
 The queue is not the durable history. It exists only to manage work that still needs to be attempted.
 
+Implementation note:
+
+- queue persistence and worker execution are owned by `src/main/db/classification-queue.ts`
+- the rest of the app still interacts with that behavior only through `DatabaseService`
+
 ### `classifications`
 
 `classifications` stores durable classifier output.
@@ -258,6 +271,11 @@ Current intent:
 - existing `classifications` rows can be preserved while minute projections are rebuilt and relinked
 
 There is an internal rebuild function in the main process that recomputes projections from `minute_ingest` without querying ActivityWatch again.
+
+Implementation note:
+
+- the rebuild logic lives in `src/main/db/projection-rebuild.ts`
+- it reuses the persistence path rather than maintaining a second write implementation
 
 This is important because it allows future logic changes to:
 
