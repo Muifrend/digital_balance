@@ -1,10 +1,10 @@
 import { JSX } from 'react'
 import type { ActivitySlice as ActivitySliceType } from '../../../../shared/calendar'
-import { isoToMinuteOfDay, minuteToY, type ZoomLevel } from './TimeGrid'
+import { isoToMinuteOfDay, minuteToY, type AggregationWindowMinutes } from './TimeGrid'
 
 type ActivitySliceProps = {
   slice: ActivitySliceType
-  zoom: ZoomLevel
+  aggregationMinutes: AggregationWindowMinutes
   onClick: (slice: ActivitySliceType) => void
   selected: boolean
 }
@@ -33,14 +33,14 @@ function sliceColors(slice: ActivitySliceType): {
 
 export default function ActivitySlice({
   slice,
-  zoom,
+  aggregationMinutes,
   onClick,
   selected
 }: ActivitySliceProps): JSX.Element {
   const startMin = isoToMinuteOfDay(slice.startAt)
   const endMin = isoToMinuteOfDay(slice.endAt)
-  const top = minuteToY(startMin, zoom)
-  const height = Math.max(minuteToY(endMin - startMin, zoom), 4)
+  const top = minuteToY(startMin, aggregationMinutes)
+  const height = Math.max(minuteToY(endMin - startMin, aggregationMinutes), 4)
 
   const { background, borderLeft, borderStyle } = sliceColors(slice)
 

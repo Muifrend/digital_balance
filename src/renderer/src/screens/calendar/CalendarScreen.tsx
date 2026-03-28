@@ -9,7 +9,7 @@ import DateNavigator from './DateNavigator'
 import EvidenceDrawer from './EvidenceDrawer'
 import ActivityLane from './ActivityLane'
 import PlannedLane from './PlannedLane'
-import TimeGrid, { type ZoomLevel } from './TimeGrid'
+import TimeGrid from './TimeGrid'
 import { useCalendarData } from './useCalendarData'
 import { useProjects } from './useProjects'
 
@@ -52,7 +52,6 @@ type CalendarScreenProps = {
 export default function CalendarScreen({ pipelineStatus }: CalendarScreenProps): JSX.Element {
   const [date, setDate] = useState(todayIso)
   const [aggregationMinutes, setAggregationMinutes] = useState<AggregationWindowMinutes>(15)
-  const [zoom, setZoom] = useState<ZoomLevel>(2)
   const [panel, setPanel] = useState<ActivePanel>({ kind: 'none' })
   const [activePrompt, setActivePrompt] = useState<CoachingPrompt | null>(null)
 
@@ -201,16 +200,6 @@ export default function CalendarScreen({ pipelineStatus }: CalendarScreenProps):
     [activePrompt]
   )
 
-  // ─── Zoom ────────────────────────────────────────────────────────────────
-
-  function adjustZoom(delta: -1 | 1): void {
-    setZoom((z) => {
-      const next = z + delta
-      if (next < 1 || next > 4) return z
-      return next as ZoomLevel
-    })
-  }
-
   // ─── Derived values for the active panel ─────────────────────────────────
 
   const selectedBlockId =
@@ -286,34 +275,6 @@ export default function CalendarScreen({ pipelineStatus }: CalendarScreenProps):
         )}
 
         <AggregationPicker value={aggregationMinutes} onChange={setAggregationMinutes} />
-
-        {/* Zoom controls */}
-        <div style={{ display: 'flex', gap: 2 }}>
-          {(['−', '+'] as const).map((label, i) => (
-            <button
-              key={label}
-              onClick={() => adjustZoom(i === 0 ? -1 : 1)}
-              disabled={(i === 0 && zoom === 1) || (i === 1 && zoom === 4)}
-              aria-label={i === 0 ? 'Zoom out' : 'Zoom in'}
-              style={{
-                width: 28,
-                height: 28,
-                borderRadius: 'var(--r-sm)',
-                border: '1px solid var(--border)',
-                background: 'var(--surface)',
-                cursor: 'pointer',
-                color: 'var(--text-secondary)',
-                fontSize: 16,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                opacity: (i === 0 && zoom === 1) || (i === 1 && zoom === 4) ? 0.4 : 1
-              }}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
       </header>
 
       {/* Lane column labels */}
@@ -360,10 +321,10 @@ export default function CalendarScreen({ pipelineStatus }: CalendarScreenProps):
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
         {/* Time grid */}
         <div style={{ flex: 1, overflow: 'hidden', position: 'relative', height: '100%' }}>
-          <TimeGrid zoom={zoom} scrollRef={scrollRef}>
+          <TimeGrid aggregationMinutes={aggregationMinutes} scrollRef={scrollRef}>
             <PlannedLane
               blocks={dayData?.plannedBlocks ?? []}
-              zoom={zoom}
+              aggregationMinutes={aggregationMinutes}
               date={date}
               scrollRef={scrollRef}
               selectedBlockId={selectedBlockId}
@@ -373,7 +334,7 @@ export default function CalendarScreen({ pipelineStatus }: CalendarScreenProps):
             />
             <ActivityLane
               slices={dayData?.activitySlices ?? []}
-              zoom={zoom}
+              aggregationMinutes={aggregationMinutes}
               selectedSliceId={selectedSliceId}
               onSliceClick={openEvidence}
             />

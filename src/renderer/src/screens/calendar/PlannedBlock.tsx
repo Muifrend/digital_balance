@@ -7,14 +7,14 @@ import {
   minuteToY,
   snapToQuarter,
   yToMinute,
-  type ZoomLevel
+  type AggregationWindowMinutes
 } from './TimeGrid'
 
 type DragKind = 'move' | 'resize-top' | 'resize-bottom'
 
 type PlannedBlockProps = {
   block: PlannedBlockType
-  zoom: ZoomLevel
+  aggregationMinutes: AggregationWindowMinutes
   date: string
   selected: boolean
   onClick: (block: PlannedBlockType) => void
@@ -46,7 +46,7 @@ const HANDLE_HEIGHT = 8 // px of resize zone at top and bottom edges
 
 export default function PlannedBlock({
   block,
-  zoom,
+  aggregationMinutes,
   date,
   selected,
   onClick,
@@ -54,8 +54,8 @@ export default function PlannedBlock({
 }: PlannedBlockProps): JSX.Element {
   const startMin = isoToMinuteOfDay(block.startAt)
   const endMin = isoToMinuteOfDay(block.endAt)
-  const top = minuteToY(startMin, zoom)
-  const height = Math.max(minuteToY(endMin - startMin, zoom), 20)
+  const top = minuteToY(startMin, aggregationMinutes)
+  const height = Math.max(minuteToY(endMin - startMin, aggregationMinutes), 20)
 
   const { bg, border, text } = blockColors(block.projectColor)
 
@@ -85,20 +85,20 @@ export default function PlannedBlock({
     if (!dragRef.current) return
     const { kind, startPointerY, originalStartMin, originalEndMin } = dragRef.current
     const deltaY = e.clientY - startPointerY
-    const deltaMins = yToMinute(deltaY, zoom)
+    const deltaMins = yToMinute(deltaY, aggregationMinutes)
 
     if (kind === 'move') {
       const duration = originalEndMin - originalStartMin
       const newStart = snapToQuarter(clamp(originalStartMin + deltaMins, 0, 24 * 60 - duration))
-      setLocalTop(minuteToY(newStart, zoom))
-      setLocalHeight(minuteToY(duration, zoom))
+      setLocalTop(minuteToY(newStart, aggregationMinutes))
+      setLocalHeight(minuteToY(duration, aggregationMinutes))
     } else if (kind === 'resize-top') {
       const newStart = snapToQuarter(clamp(originalStartMin + deltaMins, 0, originalEndMin - 15))
-      setLocalTop(minuteToY(newStart, zoom))
-      setLocalHeight(minuteToY(originalEndMin - newStart, zoom))
+      setLocalTop(minuteToY(newStart, aggregationMinutes))
+      setLocalHeight(minuteToY(originalEndMin - newStart, aggregationMinutes))
     } else {
       const newEnd = snapToQuarter(clamp(originalEndMin + deltaMins, originalStartMin + 15, 24 * 60))
-      setLocalHeight(minuteToY(newEnd - originalStartMin, zoom))
+      setLocalHeight(minuteToY(newEnd - originalStartMin, aggregationMinutes))
     }
   }
 
@@ -116,7 +116,7 @@ export default function PlannedBlock({
       return
     }
 
-    const deltaMins = yToMinute(deltaY, zoom)
+    const deltaMins = yToMinute(deltaY, aggregationMinutes)
     let newStartMin = originalStartMin
     let newEndMin = originalEndMin
 

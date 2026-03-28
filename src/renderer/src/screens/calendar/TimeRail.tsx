@@ -1,5 +1,5 @@
 import { JSX } from 'react'
-import { minuteToY, type ZoomLevel } from './TimeGrid'
+import { minuteToY, type AggregationWindowMinutes } from './TimeGrid'
 
 // 12-hour formatted label for a 0-based hour (0 = midnight, 12 = noon).
 function hourLabel(hour: number): string {
@@ -9,10 +9,10 @@ function hourLabel(hour: number): string {
 }
 
 type TimeRailProps = {
-  zoom: ZoomLevel
+  aggregationMinutes: AggregationWindowMinutes
 }
 
-export default function TimeRail({ zoom }: TimeRailProps): JSX.Element {
+export default function TimeRail({ aggregationMinutes }: TimeRailProps): JSX.Element {
   return (
     <div
       aria-hidden="true"
@@ -27,7 +27,7 @@ export default function TimeRail({ zoom }: TimeRailProps): JSX.Element {
       }}
     >
       {Array.from({ length: 24 }, (_, hour) => {
-        const top = minuteToY(hour * 60, zoom)
+        const top = minuteToY(hour * 60, aggregationMinutes)
         return (
           <div
             key={hour}

@@ -1,33 +1,32 @@
 import { JSX, useEffect, useRef } from 'react'
+import type { AggregationWindowMinutes } from '../../../../shared/calendar'
 import TimeRail from './TimeRail'
 
 // ─── Time math ────────────────────────────────────────────────────────────────
-// All pixel positioning in both lanes derives from these two exports so that
+// All pixel positioning in both lanes derives from these exports so that
 // the time axis is always consistent between PlannedLane and ActivityLane.
+//
+// Memtime-style zoom: row height stays constant at ROW_HEIGHT_PX, but each
+// row represents aggregationMinutes worth of time. The aggregation picker
+// therefore controls both bucketing and visual density.
 
-export type ZoomLevel = 1 | 2 | 3 | 4
+export { type AggregationWindowMinutes }
 
-const ZOOM_MULTIPLIERS: Record<ZoomLevel, number> = {
-  1: 0.75, // 48 px / hour
-  2: 1.25, // 80 px / hour  ← default
-  3: 1.875, // 120 px / hour
-  4: 3.125 // 200 px / hour
-}
+const ROW_HEIGHT_PX = 28
 
-export const BASE_PX_PER_HOUR = 64
-
-export function pxPerHour(zoom: ZoomLevel): number {
-  return BASE_PX_PER_HOUR * ZOOM_MULTIPLIERS[zoom]
+/** Pixels per hour for a given aggregation window. */
+export function pxPerHour(aggregationMinutes: AggregationWindowMinutes): number {
+  return ROW_HEIGHT_PX * (60 / aggregationMinutes)
 }
 
 /** Convert a minute-of-day (0–1440) to a pixel offset from the top of the grid. */
-export function minuteToY(minute: number, zoom: ZoomLevel): number {
-  return (minute / 60) * pxPerHour(zoom)
+export function minuteToY(minute: number, aggregationMinutes: AggregationWindowMinutes): number {
+  return (minute / 60) * pxPerHour(aggregationMinutes)
 }
 
 /** Convert a pixel offset from the top of the grid to a minute-of-day. */
-export function yToMinute(y: number, zoom: ZoomLevel): number {
-  return (y / pxPerHour(zoom)) * 60
+export function yToMinute(y: number, aggregationMinutes: AggregationWindowMinutes): number {
+  return (y / pxPerHour(aggregationMinutes)) * 60
 }
 
 /** Snap a minute value to the nearest 15-minute boundary. */
@@ -65,10 +64,14 @@ export function formatMinute(minute: number): string {
 
 // ─── Current time line ────────────────────────────────────────────────────────
 
-function CurrentTimeLine({ zoom }: { zoom: ZoomLevel }): JSX.Element | null {
+function CurrentTimeLine({
+  aggregationMinutes
+}: {
+  aggregationMinutes: AggregationWindowMinutes
+}): JSX.Element | null {
   const now = new Date()
   const minute = now.getHours() * 60 + now.getMinutes()
-  const top = minuteToY(minute, zoom)
+  const top = minuteToY(minute, aggregationMinutes)
 
   return (
     <div
@@ -104,13 +107,17 @@ function CurrentTimeLine({ zoom }: { zoom: ZoomLevel }): JSX.Element | null {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 type TimeGridProps = {
-  zoom: ZoomLevel
+  aggregationMinutes: AggregationWindowMinutes
   scrollRef: React.RefObject<HTMLDivElement | null>
   children: React.ReactNode
 }
 
-export default function TimeGrid({ zoom, scrollRef, children }: TimeGridProps): JSX.Element {
-  const totalHeight = 24 * pxPerHour(zoom)
+export default function TimeGrid({
+  aggregationMinutes,
+  scrollRef,
+  children
+}: TimeGridProps): JSX.Element {
+  const totalHeight = 24 * pxPerHour(aggregationMinutes)
   const innerRef = useRef<HTMLDivElement>(null)
 
   // Auto-scroll: put the hour 1 hour before now near the top of the viewport.
@@ -118,25 +125,25 @@ export default function TimeGrid({ zoom, scrollRef, children }: TimeGridProps): 
     if (!scrollRef.current) return
     const now = new Date()
     const targetMinute = Math.max(0, now.getHours() * 60 + now.getMinutes() - 60)
-    scrollRef.current.scrollTop = minuteToY(targetMinute, zoom)
-    // Intentionally only runs once on mount; zoom changes are handled separately.
+    scrollRef.current.scrollTop = minuteToY(targetMinute, aggregationMinutes)
+    // Intentionally only runs once on mount; aggregation changes are handled separately.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // On zoom change, keep the currently-centered time in view.
-  const prevZoomRef = useRef(zoom)
+  // On aggregation change, keep the currently-centered time in view.
+  const prevAggRef = useRef(aggregationMinutes)
   useEffect(() => {
-    if (prevZoomRef.current === zoom) return
+    if (prevAggRef.current === aggregationMinutes) return
     if (!scrollRef.current || !innerRef.current) return
 
     const container = scrollRef.current
     const viewportH = container.clientHeight
-    const prevPxH = pxPerHour(prevZoomRef.current)
+    const prevPxH = pxPerHour(prevAggRef.current)
     const midMinute = ((container.scrollTop + viewportH / 2) / prevPxH) * 60
 
-    prevZoomRef.current = zoom
-    container.scrollTop = minuteToY(midMinute, zoom) - viewportH / 2
-  }, [zoom, scrollRef])
+    prevAggRef.current = aggregationMinutes
+    container.scrollTop = minuteToY(midMinute, aggregationMinutes) - viewportH / 2
+  }, [aggregationMinutes, scrollRef])
 
   return (
     <div
@@ -149,8 +156,8 @@ export default function TimeGrid({ zoom, scrollRef, children }: TimeGridProps): 
       }}
     >
       <div ref={innerRef} style={{ position: 'relative', height: totalHeight, minWidth: 0 }}>
-        <TimeRail zoom={zoom} />
-        <CurrentTimeLine zoom={zoom} />
+        <TimeRail aggregationMinutes={aggregationMinutes} />
+        <CurrentTimeLine aggregationMinutes={aggregationMinutes} />
         {children}
       </div>
     </div>

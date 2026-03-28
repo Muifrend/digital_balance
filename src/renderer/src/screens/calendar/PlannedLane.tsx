@@ -7,7 +7,7 @@ import {
   minuteToY,
   snapToQuarter,
   yToMinute,
-  type ZoomLevel
+  type AggregationWindowMinutes
 } from './TimeGrid'
 import PlannedBlock from './PlannedBlock'
 
@@ -18,7 +18,7 @@ type DragState = {
 
 type PlannedLaneProps = {
   blocks: PlannedBlockType[]
-  zoom: ZoomLevel
+  aggregationMinutes: AggregationWindowMinutes
   date: string
   scrollRef: React.RefObject<HTMLDivElement | null>
   selectedBlockId: string | null
@@ -29,7 +29,7 @@ type PlannedLaneProps = {
 
 export default function PlannedLane({
   blocks,
-  zoom,
+  aggregationMinutes,
   date,
   scrollRef,
   selectedBlockId,
@@ -51,14 +51,14 @@ export default function PlannedLane({
     if ((e.target as HTMLElement).closest('[data-block]')) return
     e.currentTarget.setPointerCapture(e.pointerId)
     const y = getRelativeY(e.clientY)
-    const startMin = snapToQuarter(clamp(yToMinute(y, zoom), 0, 23 * 60 + 45))
+    const startMin = snapToQuarter(clamp(yToMinute(y, aggregationMinutes), 0, 23 * 60 + 45))
     setDragState({ startMin, endMin: startMin + 15 })
   }
 
   function handlePointerMove(e: React.PointerEvent<HTMLDivElement>): void {
     if (!dragState) return
     const y = getRelativeY(e.clientY)
-    const currentMin = snapToQuarter(clamp(yToMinute(y, zoom), 0, 24 * 60))
+    const currentMin = snapToQuarter(clamp(yToMinute(y, aggregationMinutes), 0, 24 * 60))
     setDragState((s) => s && { ...s, endMin: Math.max(currentMin, s.startMin + 15) })
   }
 
@@ -96,7 +96,7 @@ export default function PlannedLane({
           aria-hidden="true"
           style={{
             position: 'absolute',
-            top: minuteToY(hour * 60, zoom),
+            top: minuteToY(hour * 60, aggregationMinutes),
             left: 0,
             right: 0,
             height: 1,
@@ -110,7 +110,7 @@ export default function PlannedLane({
         <div key={block.id} data-block={block.id}>
           <PlannedBlock
             block={block}
-            zoom={zoom}
+            aggregationMinutes={aggregationMinutes}
             date={date}
             selected={block.id === selectedBlockId}
             onClick={onBlockClick}
@@ -125,10 +125,10 @@ export default function PlannedLane({
           aria-hidden="true"
           style={{
             position: 'absolute',
-            top: minuteToY(dragState.startMin, zoom),
+            top: minuteToY(dragState.startMin, aggregationMinutes),
             left: 4,
             right: 4,
-            height: Math.max(minuteToY(dragState.endMin - dragState.startMin, zoom), 4),
+            height: Math.max(minuteToY(dragState.endMin - dragState.startMin, aggregationMinutes), 4),
             background: 'rgba(228, 232, 203, 0.7)', // --olive-100 at 70%
             borderLeft: '3px dashed var(--olive-400)',
             border: '1.5px dashed var(--olive-400)',

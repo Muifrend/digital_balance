@@ -1,18 +1,18 @@
 import { JSX } from 'react'
 import type { ActivitySlice as ActivitySliceType } from '../../../../shared/calendar'
-import { minuteToY, type ZoomLevel } from './TimeGrid'
+import { minuteToY, type AggregationWindowMinutes } from './TimeGrid'
 import ActivitySlice from './ActivitySlice'
 
 type ActivityLaneProps = {
   slices: ActivitySliceType[]
-  zoom: ZoomLevel
+  aggregationMinutes: AggregationWindowMinutes
   selectedSliceId: string | null
   onSliceClick: (slice: ActivitySliceType) => void
 }
 
 export default function ActivityLane({
   slices,
-  zoom,
+  aggregationMinutes,
   selectedSliceId,
   onSliceClick
 }: ActivityLaneProps): JSX.Element {
@@ -35,7 +35,7 @@ export default function ActivityLane({
           aria-hidden="true"
           style={{
             position: 'absolute',
-            top: minuteToY(hour * 60, zoom),
+            top: minuteToY(hour * 60, aggregationMinutes),
             left: 0,
             right: 0,
             height: 1,
@@ -50,7 +50,7 @@ export default function ActivityLane({
           <ActivitySlice
             key={slice.id}
             slice={slice}
-            zoom={zoom}
+            aggregationMinutes={aggregationMinutes}
             selected={slice.id === selectedSliceId}
             onClick={onSliceClick}
           />
