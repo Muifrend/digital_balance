@@ -62,6 +62,41 @@ export function formatMinute(minute: number): string {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
 }
 
+/** Format an ISO timestamp as "HH:MM". Convenience wrapper used across multiple components. */
+export function formatTimeFromIso(iso: string): string {
+  return formatMinute(isoToMinuteOfDay(iso))
+}
+
+/** Format a start/end ISO pair as "HH:MM – HH:MM". */
+export function formatTimeRange(startAt: string, endAt: string): string {
+  return `${formatTimeFromIso(startAt)} – ${formatTimeFromIso(endAt)}`
+}
+
+// ─── Coordinate hook ──────────────────────────────────────────────────────────
+// Centralises viewport-coordinate → minute conversion so the scroll-container
+// reference is handled in exactly one place.
+
+export function useTimeCoords(
+  aggregationMinutes: AggregationWindowMinutes,
+  scrollRef: React.RefObject<HTMLDivElement | null>
+): {
+  clientYToMinute: (clientY: number) => number
+  deltaYToMinutes: (deltaY: number) => number
+} {
+  function clientYToMinute(clientY: number): number {
+    const container = scrollRef.current!
+    // (clientY − containerViewportTop) + scrollTop = absolute Y within grid content
+    const y = clientY - container.getBoundingClientRect().top + container.scrollTop
+    return yToMinute(y, aggregationMinutes)
+  }
+
+  function deltaYToMinutes(deltaY: number): number {
+    return yToMinute(deltaY, aggregationMinutes)
+  }
+
+  return { clientYToMinute, deltaYToMinutes }
+}
+
 // ─── Current time line ────────────────────────────────────────────────────────
 
 function CurrentTimeLine({

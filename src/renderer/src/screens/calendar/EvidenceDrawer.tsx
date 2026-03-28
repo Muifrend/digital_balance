@@ -4,7 +4,50 @@ import type {
   ActivitySlice,
   AggregationWindowMinutes
 } from '../../../../shared/calendar'
-import { formatMinute, isoToMinuteOfDay } from './TimeGrid'
+import { formatMinute, formatTimeRange, isoToMinuteOfDay } from './TimeGrid'
+import CloseButton from './CloseButton'
+import SidePanel from './SidePanel'
+import { useEscapeKey } from './useEscapeKey'
+
+// ─── Shared styles ─────────────────────────────────────────────────────────────
+
+const sectionLabel: React.CSSProperties = {
+  fontSize: 11,
+  fontWeight: 600,
+  letterSpacing: '0.1em',
+  textTransform: 'uppercase',
+  color: 'var(--text-tertiary)',
+  margin: '0 0 6px'
+}
+
+// ─── ClassificationBadge ──────────────────────────────────────────────────────
+
+function ClassificationBadge({ onTask }: { onTask: boolean | null }): JSX.Element {
+  const variants = {
+    true: { bg: 'var(--olive-100)', color: 'var(--olive-600)', label: 'On task' },
+    false: { bg: 'var(--amber-100)', color: 'var(--amber-400)', label: 'Off task' },
+    null: { bg: 'var(--bg3)', color: 'var(--text-tertiary)', label: 'Unclassified' }
+  }
+  const { bg, color, label } = variants[String(onTask) as keyof typeof variants]
+
+  return (
+    <span
+      style={{
+        display: 'inline-block',
+        padding: '2px 8px',
+        borderRadius: 'var(--r-sm)',
+        background: bg,
+        color,
+        fontSize: 11,
+        fontWeight: 500
+      }}
+    >
+      {label}
+    </span>
+  )
+}
+
+// ─── EvidenceDrawer ───────────────────────────────────────────────────────────
 
 type EvidenceDrawerProps = {
   slice: ActivitySlice
@@ -12,62 +55,6 @@ type EvidenceDrawerProps = {
   onClose: () => void
   onConfirmOnTask: (startAt: string, endAt: string) => Promise<void>
   onRedirect: (sourceBlockId: string, splitAt: string) => void
-}
-
-function ClassificationBadge({
-  onTask
-}: {
-  onTask: boolean | null
-}): JSX.Element {
-  if (onTask === true) {
-    return (
-      <span
-        style={{
-          display: 'inline-block',
-          padding: '2px 8px',
-          borderRadius: 'var(--r-sm)',
-          background: 'var(--olive-100)',
-          color: 'var(--olive-600)',
-          fontSize: 11,
-          fontWeight: 500
-        }}
-      >
-        On task
-      </span>
-    )
-  }
-  if (onTask === false) {
-    return (
-      <span
-        style={{
-          display: 'inline-block',
-          padding: '2px 8px',
-          borderRadius: 'var(--r-sm)',
-          background: 'var(--amber-100)',
-          color: 'var(--amber-400)',
-          fontSize: 11,
-          fontWeight: 500
-        }}
-      >
-        Off task
-      </span>
-    )
-  }
-  return (
-    <span
-      style={{
-        display: 'inline-block',
-        padding: '2px 8px',
-        borderRadius: 'var(--r-sm)',
-        background: 'var(--bg3)',
-        color: 'var(--text-tertiary)',
-        fontSize: 11,
-        fontWeight: 500
-      }}
-    >
-      Unclassified
-    </span>
-  )
 }
 
 export default function EvidenceDrawer({
@@ -97,14 +84,7 @@ export default function EvidenceDrawer({
       })
   }, [slice.id, slice.startAt, slice.endAt, aggregationMinutes])
 
-  // Close on Escape
-  useEffect(() => {
-    function handleKey(e: KeyboardEvent): void {
-      if (e.key === 'Escape') onClose()
-    }
-    document.addEventListener('keydown', handleKey)
-    return () => document.removeEventListener('keydown', handleKey)
-  }, [onClose])
+  useEscapeKey(onClose)
 
   async function handleConfirm(): Promise<void> {
     setConfirming(true)
@@ -116,19 +96,8 @@ export default function EvidenceDrawer({
     }
   }
 
-  const timeLabel = `${formatMinute(isoToMinuteOfDay(slice.startAt))} – ${formatMinute(isoToMinuteOfDay(slice.endAt))}`
-
   return (
-    <div
-      style={{
-        width: 340,
-        background: 'var(--surface)',
-        borderLeft: '1px solid var(--border)',
-        display: 'flex',
-        flexDirection: 'column',
-        overflow: 'hidden'
-      }}
-    >
+    <SidePanel width={340}>
       {/* Header */}
       <div
         style={{
@@ -149,7 +118,7 @@ export default function EvidenceDrawer({
               margin: 0
             }}
           >
-            {timeLabel}
+            {formatTimeRange(slice.startAt, slice.endAt)}
           </h2>
           {slice.kind !== 'gap' && slice.app && (
             <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '2px 0 0' }}>
@@ -157,50 +126,34 @@ export default function EvidenceDrawer({
             </p>
           )}
         </div>
-        <button
-          onClick={onClose}
-          aria-label="Close"
-          style={{
-            background: 'none',
-            border: 'none',
-            cursor: 'pointer',
-            color: 'var(--text-tertiary)',
-            fontSize: 18,
-            lineHeight: 1,
-            padding: 4
-          }}
-        >
-          ×
-        </button>
+        <CloseButton onClick={onClose} />
       </div>
 
       {/* Body */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div
+        style={{
+          flex: 1,
+          overflowY: 'auto',
+          padding: '16px 20px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 16
+        }}
+      >
         {loading && (
           <p style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>Loading evidence…</p>
         )}
-        {error && (
-          <p style={{ fontSize: 13, color: 'var(--terra-500)' }}>{error}</p>
-        )}
+        {error && <p style={{ fontSize: 13, color: 'var(--terra-500)' }}>{error}</p>}
 
         {evidence && (
           <>
             {/* Planned block context */}
             {evidence.plannedBlock && (
               <section>
+                <p style={sectionLabel}>Planned</p>
                 <p
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 600,
-                    letterSpacing: '0.1em',
-                    textTransform: 'uppercase',
-                    color: 'var(--text-tertiary)',
-                    margin: '0 0 6px'
-                  }}
+                  style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-primary)', margin: 0 }}
                 >
-                  Planned
-                </p>
-                <p style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-primary)', margin: 0 }}>
                   {evidence.plannedBlock.taskTitle}
                 </p>
                 {evidence.plannedBlock.projectName && (
@@ -213,18 +166,7 @@ export default function EvidenceDrawer({
 
             {/* Classification summary */}
             <section>
-              <p
-                style={{
-                  fontSize: 11,
-                  fontWeight: 600,
-                  letterSpacing: '0.1em',
-                  textTransform: 'uppercase',
-                  color: 'var(--text-tertiary)',
-                  margin: '0 0 6px'
-                }}
-              >
-                Classification
-              </p>
+              <p style={sectionLabel}>Classification</p>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <ClassificationBadge onTask={evidence.summary.onTask} />
                 {evidence.summary.confidence != null && (
@@ -251,18 +193,7 @@ export default function EvidenceDrawer({
 
             {/* Minute-by-minute list */}
             <section>
-              <p
-                style={{
-                  fontSize: 11,
-                  fontWeight: 600,
-                  letterSpacing: '0.1em',
-                  textTransform: 'uppercase',
-                  color: 'var(--text-tertiary)',
-                  margin: '0 0 6px'
-                }}
-              >
-                Minutes
-              </p>
+              <p style={sectionLabel}>Minutes</p>
               {evidence.minutes.length === 0 ? (
                 <p style={{ fontSize: 12, color: 'var(--text-tertiary)', margin: 0 }}>
                   No minute records captured for this period.
@@ -270,22 +201,18 @@ export default function EvidenceDrawer({
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                   {evidence.minutes.map((m) => {
-                    // Derive the best available label for what was happening this minute.
-                    // Priority: AFK flag → dominant app → window title → first captured window title → status hint.
                     const primaryLabel = m.afk
                       ? 'AFK'
-                      : m.app ?? m.title ?? m.windowTitles[0] ?? null
+                      : (m.app ?? m.title ?? m.windowTitles[0] ?? null)
 
-                    const statusHint =
-                      !primaryLabel
-                        ? m.summaryStatus === 'no_winner'
-                          ? 'No dominant app'
-                          : m.summaryStatus === 'afk'
-                            ? 'AFK'
-                            : 'No capture'
-                        : null
+                    const statusHint = !primaryLabel
+                      ? m.summaryStatus === 'no_winner'
+                        ? 'No dominant app'
+                        : m.summaryStatus === 'afk'
+                          ? 'AFK'
+                          : 'No capture'
+                      : null
 
-                    // Show a secondary line when there's a title distinct from the app.
                     const secondaryLabel =
                       primaryLabel && m.title && m.title !== primaryLabel ? m.title : null
 
@@ -317,7 +244,9 @@ export default function EvidenceDrawer({
                           <span
                             style={{
                               fontSize: 11,
-                              color: primaryLabel ? 'var(--text-secondary)' : 'var(--text-tertiary)',
+                              color: primaryLabel
+                                ? 'var(--text-secondary)'
+                                : 'var(--text-tertiary)',
                               display: 'block',
                               overflow: 'hidden',
                               whiteSpace: 'nowrap',
@@ -385,9 +314,7 @@ export default function EvidenceDrawer({
           )}
           {evidence.plannedBlock && (
             <button
-              onClick={() =>
-                onRedirect(evidence.plannedBlock!.id, slice.startAt)
-              }
+              onClick={() => onRedirect(evidence.plannedBlock!.id, slice.startAt)}
               style={{
                 flex: 1,
                 padding: '8px 0',
@@ -406,6 +333,6 @@ export default function EvidenceDrawer({
           )}
         </div>
       )}
-    </div>
+    </SidePanel>
   )
 }

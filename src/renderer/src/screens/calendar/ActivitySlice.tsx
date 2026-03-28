@@ -38,9 +38,9 @@ export default function ActivitySlice({
   selected
 }: ActivitySliceProps): JSX.Element {
   const startMin = isoToMinuteOfDay(slice.startAt)
-  const endMin = isoToMinuteOfDay(slice.endAt)
+  const durationMin = (new Date(slice.endAt).getTime() - new Date(slice.startAt).getTime()) / 60000
   const top = minuteToY(startMin, aggregationMinutes)
-  const height = Math.max(minuteToY(endMin - startMin, aggregationMinutes), 4)
+  const height = Math.max(minuteToY(durationMin, aggregationMinutes), 4)
 
   const { background, borderLeft, borderStyle } = sliceColors(slice)
 

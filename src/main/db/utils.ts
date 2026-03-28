@@ -103,9 +103,21 @@ export function ensureIsoTimestamp(value: string, label: string): string {
 }
 
 export function assertSingleDayRange(startAt: string, endAt: string): void {
-  if (getLocalDateKey(startAt) !== getLocalDateKey(endAt)) {
-    throw new Error('Schedule blocks must stay within a single local day')
-  }
+  const startKey = getLocalDateKey(startAt)
+  const endKey = getLocalDateKey(endAt)
+  if (startKey === endKey) return
+
+  // Midnight (00:00:00.000) of the next calendar day is the conventional
+  // end-of-day sentinel and is accepted as a valid end time for the start day.
+  const endDate = new Date(endAt)
+  const isMidnightNextDay =
+    endDate.getHours() === 0 &&
+    endDate.getMinutes() === 0 &&
+    endDate.getSeconds() === 0 &&
+    endDate.getMilliseconds() === 0
+  if (isMidnightNextDay) return
+
+  throw new Error('Schedule blocks must stay within a single local day')
 }
 
 export function buildGoalVersion(input: {

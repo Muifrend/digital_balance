@@ -1,4 +1,4 @@
-import { JSX, useRef, useState } from 'react'
+import { JSX, useState } from 'react'
 import type { PlannedBlock as PlannedBlockType } from '../../../../shared/calendar'
 import {
   clamp,
@@ -6,9 +6,10 @@ import {
   minuteOfDayToIso,
   minuteToY,
   snapToQuarter,
-  yToMinute,
+  useTimeCoords,
   type AggregationWindowMinutes
 } from './TimeGrid'
+import HourGridLines from './HourGridLines'
 import PlannedBlock from './PlannedBlock'
 
 type DragState = {
@@ -37,28 +38,20 @@ export default function PlannedLane({
   onBlockUpdate,
   onCreateDraft
 }: PlannedLaneProps): JSX.Element {
-  const laneRef = useRef<HTMLDivElement>(null)
   const [dragState, setDragState] = useState<DragState | null>(null)
-
-  function getRelativeY(clientY: number): number {
-    const rect = laneRef.current!.getBoundingClientRect()
-    const scrollTop = scrollRef.current?.scrollTop ?? 0
-    return clientY - rect.top + scrollTop
-  }
+  const { clientYToMinute } = useTimeCoords(aggregationMinutes, scrollRef)
 
   function handlePointerDown(e: React.PointerEvent<HTMLDivElement>): void {
     // Only respond to clicks directly on the lane background.
     if ((e.target as HTMLElement).closest('[data-block]')) return
     e.currentTarget.setPointerCapture(e.pointerId)
-    const y = getRelativeY(e.clientY)
-    const startMin = snapToQuarter(clamp(yToMinute(y, aggregationMinutes), 0, 23 * 60 + 45))
+    const startMin = snapToQuarter(clamp(clientYToMinute(e.clientY), 0, 23 * 60 + 45))
     setDragState({ startMin, endMin: startMin + 15 })
   }
 
   function handlePointerMove(e: React.PointerEvent<HTMLDivElement>): void {
     if (!dragState) return
-    const y = getRelativeY(e.clientY)
-    const currentMin = snapToQuarter(clamp(yToMinute(y, aggregationMinutes), 0, 24 * 60))
+    const currentMin = snapToQuarter(clamp(clientYToMinute(e.clientY), 0, 24 * 60))
     setDragState((s) => s && { ...s, endMin: Math.max(currentMin, s.startMin + 15) })
   }
 
@@ -73,7 +66,6 @@ export default function PlannedLane({
 
   return (
     <div
-      ref={laneRef}
       aria-label="Planned blocks"
       style={{
         position: 'absolute',
@@ -89,21 +81,7 @@ export default function PlannedLane({
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerUp}
     >
-      {/* Hour grid lines */}
-      {Array.from({ length: 24 }, (_, hour) => (
-        <div
-          key={hour}
-          aria-hidden="true"
-          style={{
-            position: 'absolute',
-            top: minuteToY(hour * 60, aggregationMinutes),
-            left: 0,
-            right: 0,
-            height: 1,
-            background: 'var(--border)'
-          }}
-        />
-      ))}
+      <HourGridLines aggregationMinutes={aggregationMinutes} />
 
       {/* Planned blocks */}
       {blocks.map((block) => (
@@ -111,6 +89,7 @@ export default function PlannedLane({
           <PlannedBlock
             block={block}
             aggregationMinutes={aggregationMinutes}
+            scrollRef={scrollRef}
             date={date}
             selected={block.id === selectedBlockId}
             onClick={onBlockClick}

@@ -6,7 +6,7 @@ import {
   minuteOfDayToIso,
   minuteToY,
   snapToQuarter,
-  yToMinute,
+  useTimeCoords,
   type AggregationWindowMinutes
 } from './TimeGrid'
 
@@ -15,6 +15,7 @@ type DragKind = 'move' | 'resize-top' | 'resize-bottom'
 type PlannedBlockProps = {
   block: PlannedBlockType
   aggregationMinutes: AggregationWindowMinutes
+  scrollRef: React.RefObject<HTMLDivElement | null>
   date: string
   selected: boolean
   onClick: (block: PlannedBlockType) => void
@@ -47,15 +48,17 @@ const HANDLE_HEIGHT = 8 // px of resize zone at top and bottom edges
 export default function PlannedBlock({
   block,
   aggregationMinutes,
+  scrollRef,
   date,
   selected,
   onClick,
   onUpdate
 }: PlannedBlockProps): JSX.Element {
+  const { deltaYToMinutes } = useTimeCoords(aggregationMinutes, scrollRef)
   const startMin = isoToMinuteOfDay(block.startAt)
-  const endMin = isoToMinuteOfDay(block.endAt)
+  const durationMin = (new Date(block.endAt).getTime() - new Date(block.startAt).getTime()) / 60000
   const top = minuteToY(startMin, aggregationMinutes)
-  const height = Math.max(minuteToY(endMin - startMin, aggregationMinutes), 20)
+  const height = Math.max(minuteToY(durationMin, aggregationMinutes), 20)
 
   const { bg, border, text } = blockColors(block.projectColor)
 
@@ -77,7 +80,7 @@ export default function PlannedBlock({
       kind,
       startPointerY: e.clientY,
       originalStartMin: startMin,
-      originalEndMin: endMin
+      originalEndMin: startMin + durationMin
     }
   }
 
@@ -85,7 +88,7 @@ export default function PlannedBlock({
     if (!dragRef.current) return
     const { kind, startPointerY, originalStartMin, originalEndMin } = dragRef.current
     const deltaY = e.clientY - startPointerY
-    const deltaMins = yToMinute(deltaY, aggregationMinutes)
+    const deltaMins = deltaYToMinutes(deltaY)
 
     if (kind === 'move') {
       const duration = originalEndMin - originalStartMin
@@ -116,7 +119,7 @@ export default function PlannedBlock({
       return
     }
 
-    const deltaMins = yToMinute(deltaY, aggregationMinutes)
+    const deltaMins = deltaYToMinutes(deltaY)
     let newStartMin = originalStartMin
     let newEndMin = originalEndMin
 

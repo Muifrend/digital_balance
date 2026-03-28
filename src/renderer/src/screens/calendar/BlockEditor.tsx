@@ -1,7 +1,10 @@
 import { JSX, useEffect, useRef, useState } from 'react'
 import type { PlannedBlock } from '../../../../shared/calendar'
 import type { ProjectRecord } from '../../../../shared/projects'
-import { formatMinute, isoToMinuteOfDay } from './TimeGrid'
+import { formatTimeRange } from './TimeGrid'
+import CloseButton from './CloseButton'
+import SidePanel from './SidePanel'
+import { useEscapeKey } from './useEscapeKey'
 
 export type BlockEditorMode = 'create' | 'edit' | 'redirect'
 
@@ -99,10 +102,6 @@ const btnGhost: React.CSSProperties = {
   transition: 'background 120ms ease-out'
 }
 
-function formatTimeRange(startAt: string, endAt: string): string {
-  return `${formatMinute(isoToMinuteOfDay(startAt))} – ${formatMinute(isoToMinuteOfDay(endAt))}`
-}
-
 export default function BlockEditor({
   mode,
   initialValues,
@@ -126,6 +125,8 @@ export default function BlockEditor({
   useEffect(() => {
     titleRef.current?.focus()
   }, [])
+
+  useEscapeKey(onClose)
 
   const heading =
     mode === 'redirect'
@@ -182,26 +183,8 @@ export default function BlockEditor({
     }
   }
 
-  // Close on Escape
-  useEffect(() => {
-    function handleKey(e: KeyboardEvent): void {
-      if (e.key === 'Escape') onClose()
-    }
-    document.addEventListener('keydown', handleKey)
-    return () => document.removeEventListener('keydown', handleKey)
-  }, [onClose])
-
   return (
-    <div
-      style={{
-        width: 320,
-        background: 'var(--surface)',
-        borderLeft: '1px solid var(--border)',
-        display: 'flex',
-        flexDirection: 'column',
-        overflow: 'hidden'
-      }}
-    >
+    <SidePanel width={320}>
       {/* Header */}
       <div
         style={{
@@ -228,21 +211,7 @@ export default function BlockEditor({
             {formatTimeRange(initialValues.startAt, initialValues.endAt)}
           </p>
         </div>
-        <button
-          onClick={onClose}
-          aria-label="Close"
-          style={{
-            background: 'none',
-            border: 'none',
-            cursor: 'pointer',
-            color: 'var(--text-tertiary)',
-            fontSize: 18,
-            lineHeight: 1,
-            padding: 4
-          }}
-        >
-          ×
-        </button>
+        <CloseButton onClick={onClose} />
       </div>
 
       {/* Form */}
@@ -394,6 +363,6 @@ export default function BlockEditor({
           </div>
         )}
       </form>
-    </div>
+    </SidePanel>
   )
 }
