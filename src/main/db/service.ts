@@ -1,12 +1,21 @@
 import Database from 'better-sqlite3'
+import type {
+  ActivityEvidence,
+  AggregationWindowMinutes,
+  DayViewData,
+  PlannedBlock
+} from '../../shared/calendar'
+import type { ProjectRecord } from '../../shared/projects'
 import {
   type MinutePersistencePayload,
   type RebuildMinutesProjectionOptions
 } from '../pipeline/minute'
-import { createClassificationQueue } from './classification-queue'
+import { createClassificationQueue, type ClassificationQueue } from './classification-queue'
 import { createDatabaseContext } from './context'
+import { createDayViewDatabase, type CoachingSnapshot, type DayViewDatabase } from './day-view'
 import { runDatabaseMigrations } from './migrations'
 import { createPersistence, type DatabasePersistence } from './persistence'
+import { createPlanningDatabase, type PlanningDatabase } from './planning'
 import { createProjectionRebuild, type ProjectionRebuild } from './projection-rebuild'
 import { prepareStatements, resetPreparedState } from './statements'
 
@@ -16,6 +25,60 @@ export type DatabaseService = {
   getPreviousAfkStreak: (minuteTimestamp: string) => number
   rebuildMinutesProjection: (options?: RebuildMinutesProjectionOptions) => void
   startClassificationWorker: () => Promise<void>
+  listProjects: () => ProjectRecord[]
+  createProject: (input: {
+    name: string
+    description: string | null
+    color: string | null
+  }) => ProjectRecord
+  updateProject: (input: {
+    id: string
+    name: string
+    description: string | null
+    color: string | null
+  }) => ProjectRecord
+  archiveProject: (input: { id: string; archived: boolean }) => void
+  createScheduleBlock: (input: {
+    projectId: string | null
+    taskTitle: string
+    taskDescription: string | null
+    goalSeed: string | null
+    startAt: string
+    endAt: string
+  }) => PlannedBlock
+  updateScheduleBlock: (input: {
+    id: string
+    projectId: string | null
+    taskTitle: string
+    taskDescription: string | null
+    goalSeed: string | null
+    startAt: string
+    endAt: string
+  }) => PlannedBlock
+  deleteScheduleBlock: (input: { id: string }) => void
+  redirectScheduleBlock: (input: {
+    sourceBlockId: string
+    splitAt: string
+    projectId: string | null
+    taskTitle: string
+    taskDescription: string | null
+    goalSeed: string | null
+  }) => {
+    preservedBlock: PlannedBlock
+    redirectedBlock: PlannedBlock
+  }
+  getDayViewData: (input: {
+    date: string
+    aggregationMinutes: AggregationWindowMinutes
+  }) => DayViewData
+  getActivityEvidence: (input: {
+    startAt: string
+    endAt: string
+    aggregationMinutes: AggregationWindowMinutes
+  }) => ActivityEvidence
+  confirmOnTask: (input: { startAt: string; endAt: string }) => void
+  getCoachingSnapshot: (input?: { referenceTime?: string }) => CoachingSnapshot
+  onCalendarChange: (listener: (date: string) => void) => () => void
   close: () => void
 }
 
@@ -24,9 +87,18 @@ export function createDatabaseService(options: {
   projectRoot: string
 }): DatabaseService {
   const context = createDatabaseContext()
-  const classificationQueue = createClassificationQueue(context)
+  const calendarChangeListeners = new Set<(date: string) => void>()
+  let classificationQueue: ClassificationQueue | null = null
   let persistence: DatabasePersistence | null = null
   let projectionRebuild: ProjectionRebuild | null = null
+  let planning: PlanningDatabase | null = null
+  let dayView: DayViewDatabase | null = null
+
+  function notifyCalendarChanged(date: string): void {
+    for (const listener of calendarChangeListeners) {
+      listener(date)
+    }
+  }
 
   function initialize(): void {
     if (context.database) {
@@ -39,17 +111,26 @@ export function createDatabaseService(options: {
       runDatabaseMigrations(context.database)
       context.prepared = prepareStatements(context.database)
 
+      planning = createPlanningDatabase(context, notifyCalendarChanged)
+      classificationQueue = createClassificationQueue(context, {
+        getPlannedContextForTimestamp: planning.getPlannedContextForTimestamp,
+        notifyCalendarChanged
+      })
       classificationQueue.initialize(options.projectRoot)
-      persistence = createPersistence(context, classificationQueue)
+      persistence = createPersistence(context, classificationQueue, notifyCalendarChanged)
       projectionRebuild = createProjectionRebuild(context, persistence)
+      dayView = createDayViewDatabase(context, planning)
     } catch (error) {
       console.error('[db] Failed to initialize database:', error)
-      classificationQueue.stop()
+      classificationQueue?.stop()
       resetPreparedState(context)
       context.openAiApiKey = null
       context.database = null
+      classificationQueue = null
       persistence = null
       projectionRebuild = null
+      planning = null
+      dayView = null
     }
   }
 
@@ -65,8 +146,155 @@ export function createDatabaseService(options: {
     projectionRebuild?.rebuildMinutesProjection(options)
   }
 
+  function startClassificationWorker(): Promise<void> {
+    return classificationQueue?.startClassificationWorker() ?? Promise.resolve()
+  }
+
+  function listProjects(): ProjectRecord[] {
+    return planning?.listProjects() ?? []
+  }
+
+  function createProject(input: {
+    name: string
+    description: string | null
+    color: string | null
+  }): ProjectRecord {
+    if (!planning) {
+      throw new Error('Database not initialized')
+    }
+
+    return planning.createProject(input)
+  }
+
+  function updateProject(input: {
+    id: string
+    name: string
+    description: string | null
+    color: string | null
+  }): ProjectRecord {
+    if (!planning) {
+      throw new Error('Database not initialized')
+    }
+
+    return planning.updateProject(input)
+  }
+
+  function archiveProject(input: { id: string; archived: boolean }): void {
+    if (!planning) {
+      throw new Error('Database not initialized')
+    }
+
+    planning.archiveProject(input)
+  }
+
+  function createScheduleBlock(input: {
+    projectId: string | null
+    taskTitle: string
+    taskDescription: string | null
+    goalSeed: string | null
+    startAt: string
+    endAt: string
+  }): PlannedBlock {
+    if (!planning) {
+      throw new Error('Database not initialized')
+    }
+
+    return planning.createScheduleBlock(input)
+  }
+
+  function updateScheduleBlock(input: {
+    id: string
+    projectId: string | null
+    taskTitle: string
+    taskDescription: string | null
+    goalSeed: string | null
+    startAt: string
+    endAt: string
+  }): PlannedBlock {
+    if (!planning) {
+      throw new Error('Database not initialized')
+    }
+
+    return planning.updateScheduleBlock(input)
+  }
+
+  function deleteScheduleBlock(input: { id: string }): void {
+    if (!planning) {
+      throw new Error('Database not initialized')
+    }
+
+    planning.deleteScheduleBlock(input)
+  }
+
+  function redirectScheduleBlock(input: {
+    sourceBlockId: string
+    splitAt: string
+    projectId: string | null
+    taskTitle: string
+    taskDescription: string | null
+    goalSeed: string | null
+  }): {
+    preservedBlock: PlannedBlock
+    redirectedBlock: PlannedBlock
+  } {
+    if (!planning) {
+      throw new Error('Database not initialized')
+    }
+
+    return planning.redirectScheduleBlock(input)
+  }
+
+  function getDayViewData(input: {
+    date: string
+    aggregationMinutes: AggregationWindowMinutes
+  }): DayViewData {
+    if (!dayView) {
+      throw new Error('Database not initialized')
+    }
+
+    return dayView.getDayViewData(input)
+  }
+
+  function getActivityEvidence(input: {
+    startAt: string
+    endAt: string
+    aggregationMinutes: AggregationWindowMinutes
+  }): ActivityEvidence {
+    if (!dayView) {
+      throw new Error('Database not initialized')
+    }
+
+    return dayView.getActivityEvidence(input)
+  }
+
+  function confirmOnTask(input: { startAt: string; endAt: string }): void {
+    if (!planning) {
+      throw new Error('Database not initialized')
+    }
+
+    planning.confirmOnTask(input)
+  }
+
+  function getCoachingSnapshot(input?: { referenceTime?: string }): CoachingSnapshot {
+    if (!dayView) {
+      return {
+        activeBlock: null,
+        recentMinutes: []
+      }
+    }
+
+    return dayView.getCoachingSnapshot(input)
+  }
+
+  function onCalendarChange(listener: (date: string) => void): () => void {
+    calendarChangeListeners.add(listener)
+    return () => {
+      calendarChangeListeners.delete(listener)
+    }
+  }
+
   function close(): void {
-    classificationQueue.stop()
+    classificationQueue?.stop()
 
     if (!context.database) {
       return
@@ -80,8 +308,11 @@ export function createDatabaseService(options: {
       resetPreparedState(context)
       context.openAiApiKey = null
       context.database = null
+      classificationQueue = null
       persistence = null
       projectionRebuild = null
+      planning = null
+      dayView = null
     }
   }
 
@@ -90,7 +321,20 @@ export function createDatabaseService(options: {
     persistMinutePayload,
     getPreviousAfkStreak,
     rebuildMinutesProjection,
-    startClassificationWorker: classificationQueue.startClassificationWorker,
+    startClassificationWorker,
+    listProjects,
+    createProject,
+    updateProject,
+    archiveProject,
+    createScheduleBlock,
+    updateScheduleBlock,
+    deleteScheduleBlock,
+    redirectScheduleBlock,
+    getDayViewData,
+    getActivityEvidence,
+    confirmOnTask,
+    getCoachingSnapshot,
+    onCalendarChange,
     close
   }
 }

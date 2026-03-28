@@ -159,7 +159,7 @@ export function prepareStatements(database: Database.Database): PreparedStatemen
       WHERE status = 'processing'
     `),
     selectDueClassificationJobStatement: database.prepare(`
-      SELECT id, minute_timestamp, attempt_count
+      SELECT id, minute_timestamp, attempt_count, payload_json, goal_version
       FROM classification_jobs
       WHERE status = 'pending'
         AND (next_attempt_at IS NULL OR next_attempt_at <= datetime('now'))
@@ -216,6 +216,7 @@ export function prepareStatements(database: Database.Database): PreparedStatemen
       INSERT OR IGNORE INTO classifications (
         minute_id,
         minute_timestamp,
+        planned_block_id,
         on_task,
         confidence,
         reasoning,
@@ -227,7 +228,7 @@ export function prepareStatements(database: Database.Database): PreparedStatemen
         goal_title,
         goal_description
       )
-      VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)
     `)
   }
 }

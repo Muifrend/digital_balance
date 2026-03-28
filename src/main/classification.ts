@@ -5,17 +5,15 @@ export const OPENAI_MODEL = 'gpt-4o-mini'
 export const PROMPT_VERSION = 'on-task-v1'
 export const CLASSIFIER_VERSION = 'openai-on-task-v1'
 
-export const ACTIVE_GOAL = {
-  version: 'placeholder-goal-v1',
-  title: 'Build the digital balance app',
-  description: 'Working on Electron, TypeScript, ActivityWatch integration and SQLite persistence'
-} as const
-
 export type ClassificationRequestInput = {
   app: string
   title: string | null
   dominance: number | null
   afk: boolean
+  goalTitle: string
+  goalDescription: string | null
+  goalSeed: string | null
+  projectName: string | null
 }
 
 export type ParsedClassificationResponse = {
@@ -87,8 +85,10 @@ Activity:
 - Dominance: ${input.dominance ?? 'null'} (fraction of the minute on this app)
 - AFK: ${input.afk} (user had no keyboard/mouse input)
 
-Current goal: ${ACTIVE_GOAL.title}
-Goal description: ${ACTIVE_GOAL.description}
+Current goal: ${input.goalTitle}
+Goal description: ${input.goalDescription ?? 'null'}
+Goal seed: ${input.goalSeed ?? 'null'}
+Project name: ${input.projectName ?? 'null'}
 
 Respond with exactly this JSON shape:
 {

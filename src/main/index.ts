@@ -3,18 +3,44 @@ import { existsSync } from 'fs'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { createActivityWatchService } from './activitywatch/service'
+import { createCoachingService, type CoachingService } from './coaching/service'
 import { createDatabaseService, type DatabaseService } from './db/service'
 import { createPipelineService, type PipelineService } from './pipeline/service'
+import {
+  CALENDAR_CHANGED_CHANNEL,
+  CALENDAR_CONFIRM_ON_TASK_CHANNEL,
+  CALENDAR_CREATE_BLOCK_CHANNEL,
+  CALENDAR_DELETE_BLOCK_CHANNEL,
+  CALENDAR_GET_DAY_CHANNEL,
+  CALENDAR_GET_EVIDENCE_CHANNEL,
+  CALENDAR_REDIRECT_BLOCK_CHANNEL,
+  CALENDAR_UPDATE_BLOCK_CHANNEL
+} from '../shared/calendar'
+import {
+  COACHING_CONFIRM_CHANNEL,
+  COACHING_DISMISS_CHANNEL,
+  COACHING_GET_ACTIVE_CHANNEL,
+  COACHING_REDIRECT_CHANNEL,
+  COACHING_STATUS_CHANNEL,
+  type CoachingPrompt
+} from '../shared/coaching'
 import {
   PIPELINE_GET_STATUS_CHANNEL,
   PIPELINE_STATUS_CHANNEL,
   createInitialPipelineStatus,
   type PipelineStatus
 } from '../shared/pipeline'
+import {
+  PROJECTS_ARCHIVE_CHANNEL,
+  PROJECTS_CREATE_CHANNEL,
+  PROJECTS_LIST_CHANNEL,
+  PROJECTS_UPDATE_CHANNEL
+} from '../shared/projects'
 import icon from '../../resources/icon.png?asset'
 
 let databaseService: DatabaseService | null = null
 let pipelineService: PipelineService | null = null
+let coachingService: CoachingService | null = null
 
 function resolveProjectRoot(): string {
   const candidates = [process.cwd(), app.getAppPath(), join(__dirname, '../..')]
@@ -29,6 +55,22 @@ function broadcastPipelineStatus(status: PipelineStatus): void {
   for (const window of BrowserWindow.getAllWindows()) {
     if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
       window.webContents.send(PIPELINE_STATUS_CHANNEL, status)
+    }
+  }
+}
+
+function broadcastCalendarChanged(date: string): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
+      window.webContents.send(CALENDAR_CHANGED_CHANNEL, date)
+    }
+  }
+}
+
+function broadcastCoachingPrompt(prompt: CoachingPrompt | null): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
+      window.webContents.send(COACHING_STATUS_CHANNEL, prompt)
     }
   }
 }
@@ -71,6 +113,43 @@ app.whenReady().then(() => {
 
   ipcMain.on('ping', () => console.log('pong'))
   ipcMain.handle(PIPELINE_GET_STATUS_CHANNEL, () => getPipelineStatusSnapshot())
+  ipcMain.handle(PROJECTS_LIST_CHANNEL, () => databaseService?.listProjects() ?? [])
+  ipcMain.handle(PROJECTS_CREATE_CHANNEL, (_event, input) => databaseService?.createProject(input))
+  ipcMain.handle(PROJECTS_UPDATE_CHANNEL, (_event, input) => databaseService?.updateProject(input))
+  ipcMain.handle(PROJECTS_ARCHIVE_CHANNEL, (_event, input) =>
+    databaseService?.archiveProject(input)
+  )
+  ipcMain.handle(CALENDAR_GET_DAY_CHANNEL, (_event, input) =>
+    databaseService?.getDayViewData(input)
+  )
+  ipcMain.handle(CALENDAR_GET_EVIDENCE_CHANNEL, (_event, input) =>
+    databaseService?.getActivityEvidence(input)
+  )
+  ipcMain.handle(CALENDAR_CREATE_BLOCK_CHANNEL, (_event, input) =>
+    databaseService?.createScheduleBlock(input)
+  )
+  ipcMain.handle(CALENDAR_UPDATE_BLOCK_CHANNEL, (_event, input) =>
+    databaseService?.updateScheduleBlock(input)
+  )
+  ipcMain.handle(CALENDAR_DELETE_BLOCK_CHANNEL, (_event, input) =>
+    databaseService?.deleteScheduleBlock(input)
+  )
+  ipcMain.handle(CALENDAR_REDIRECT_BLOCK_CHANNEL, (_event, input) =>
+    databaseService?.redirectScheduleBlock(input)
+  )
+  ipcMain.handle(CALENDAR_CONFIRM_ON_TASK_CHANNEL, (_event, input) =>
+    databaseService?.confirmOnTask(input)
+  )
+  ipcMain.handle(COACHING_GET_ACTIVE_CHANNEL, () => coachingService?.getActivePrompt() ?? null)
+  ipcMain.handle(COACHING_CONFIRM_CHANNEL, (_event, input) =>
+    coachingService?.confirmPrompt(input.promptId)
+  )
+  ipcMain.handle(COACHING_DISMISS_CHANNEL, (_event, input) =>
+    coachingService?.dismissPrompt(input.promptId)
+  )
+  ipcMain.handle(COACHING_REDIRECT_CHANNEL, (_event, input) =>
+    coachingService?.redirectPrompt(input)
+  )
 
   databaseService = createDatabaseService({
     databasePath: join(app.getPath('userData'), 'digital_balance.db'),
@@ -78,6 +157,9 @@ app.whenReady().then(() => {
   })
   databaseService.initialize()
   void databaseService.startClassificationWorker()
+  databaseService.onCalendarChange((date) => {
+    broadcastCalendarChanged(date)
+  })
 
   const activityWatchService = createActivityWatchService()
   pipelineService = createPipelineService({
@@ -88,6 +170,14 @@ app.whenReady().then(() => {
     }
   })
   void pipelineService.start()
+
+  coachingService = createCoachingService({
+    database: databaseService
+  })
+  coachingService.onPromptChange((prompt) => {
+    broadcastCoachingPrompt(prompt)
+  })
+  coachingService.start()
 
   createWindow()
 
@@ -103,6 +193,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  coachingService?.stop()
   pipelineService?.stop()
   databaseService?.close()
 })

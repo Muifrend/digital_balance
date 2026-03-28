@@ -1,5 +1,4 @@
 import {
-  ACTIVE_GOAL,
   CLASSIFIER_VERSION,
   OPENAI_MODEL,
   PROMPT_VERSION,
@@ -31,6 +30,7 @@ import {
   type NextPendingClassificationJobRow,
   type PendingClassificationCountRow
 } from './context'
+import { buildGoalVersion, getLocalDateKey, type PlannedContext } from './utils'
 
 export type ClassificationQueue = {
   initialize: (projectRoot: string) => void
@@ -43,7 +43,13 @@ export type ClassificationQueue = {
   stop: () => void
 }
 
-export function createClassificationQueue(context: DatabaseContext): ClassificationQueue {
+export function createClassificationQueue(
+  context: DatabaseContext,
+  options: {
+    getPlannedContextForTimestamp: (timestamp: string) => PlannedContext | null
+    notifyCalendarChanged: (date: string) => void
+  }
+): ClassificationQueue {
   function buildMinuteRecordFromClassificationRow(row: MinuteClassificationRow): MinuteRecord {
     return {
       timestamp: row.timestamp,
@@ -61,8 +67,14 @@ export function createClassificationQueue(context: DatabaseContext): Classificat
       return null
     }
 
+    const plannedContext = options.getPlannedContextForTimestamp(payload.minuteTimestamp)
+    if (!plannedContext) {
+      return null
+    }
+
     return {
       timestamp: payload.minuteTimestamp,
+      planned_block_id: plannedContext.blockId,
       timezone_name: payload.timezoneName,
       utc_offset_minutes: payload.utcOffsetMinutes,
       app: payload.record.app,
@@ -86,9 +98,16 @@ export function createClassificationQueue(context: DatabaseContext): Classificat
       model_name: OPENAI_MODEL,
       prompt_version: PROMPT_VERSION,
       classifier_version: CLASSIFIER_VERSION,
-      goal_version: ACTIVE_GOAL.version,
-      goal_title: ACTIVE_GOAL.title,
-      goal_description: ACTIVE_GOAL.description
+      goal_version: buildGoalVersion({
+        taskTitle: plannedContext.taskTitle,
+        taskDescription: plannedContext.taskDescription,
+        goalSeed: plannedContext.goalSeed,
+        projectName: plannedContext.projectName
+      }),
+      goal_title: plannedContext.taskTitle,
+      goal_description: plannedContext.taskDescription,
+      goal_seed: plannedContext.goalSeed,
+      project_name: plannedContext.projectName
     }
   }
 
@@ -143,8 +162,13 @@ export function createClassificationQueue(context: DatabaseContext): Classificat
     return iso.slice(0, 19).replace('T', ' ')
   }
 
+  function parseJobPayload(payloadJson: string): ClassificationJobPayload {
+    return JSON.parse(payloadJson) as ClassificationJobPayload
+  }
+
   function requestClassification(
-    record: MinuteRecord & { app: string }
+    record: MinuteRecord & { app: string },
+    payload: ClassificationJobPayload
   ): Promise<ParsedClassificationResponse> {
     if (!context.openAiApiKey) {
       throw new Error('OPENAI_API_KEY missing or blank')
@@ -154,7 +178,11 @@ export function createClassificationQueue(context: DatabaseContext): Classificat
       app: record.app,
       title: record.title,
       dominance: record.dominance,
-      afk: record.afk
+      afk: record.afk,
+      goalTitle: payload.goal_title,
+      goalDescription: payload.goal_description,
+      goalSeed: payload.goal_seed,
+      projectName: payload.project_name
     })
 
     return fetch('https://api.openai.com/v1/chat/completions', {
@@ -214,7 +242,7 @@ export function createClassificationQueue(context: DatabaseContext): Classificat
         CLASSIFIER_VERSION,
         PROMPT_VERSION,
         OPENAI_MODEL,
-        ACTIVE_GOAL.version,
+        job.goal_version,
         job.id
       )
       console.warn(`[classify] Failed for ${job.minute_timestamp}: ${errorMessage}`)
@@ -300,12 +328,13 @@ export function createClassificationQueue(context: DatabaseContext): Classificat
             continue
           }
 
+          const jobPayload = parseJobPayload(job.payload_json)
           const existingClassification = context.prepared.selectExistingClassificationStatement.get(
             minuteRow.timestamp,
             OPENAI_MODEL,
             PROMPT_VERSION,
             CLASSIFIER_VERSION,
-            ACTIVE_GOAL.version
+            jobPayload.goal_version
           ) as ExistingClassificationRow | undefined
 
           if (existingClassification) {
@@ -313,19 +342,20 @@ export function createClassificationQueue(context: DatabaseContext): Classificat
             continue
           }
 
-          const classification = await requestClassification(record)
+          const classification = await requestClassification(record, jobPayload)
           const insertedClassification = context.prepared.insertClassificationStatement.run(
             minuteRow.id,
             minuteRow.timestamp,
+            jobPayload.planned_block_id,
             classification.onTask ? 1 : 0,
             classification.confidence,
             classification.reasoning,
             OPENAI_MODEL,
             PROMPT_VERSION,
             CLASSIFIER_VERSION,
-            ACTIVE_GOAL.version,
-            ACTIVE_GOAL.title,
-            ACTIVE_GOAL.description
+            jobPayload.goal_version,
+            jobPayload.goal_title,
+            jobPayload.goal_description ?? ''
           ) as DatabaseWriteResult
 
           context.prepared.deleteClassificationJobByIdStatement.run(job.id)
@@ -334,6 +364,7 @@ export function createClassificationQueue(context: DatabaseContext): Classificat
             console.log(
               `[classify] ${minuteRow.timestamp} -> on_task: ${classification.onTask} (confidence: ${classification.confidence.toFixed(2)}) - ${classification.reasoning ?? 'No reasoning provided'}`
             )
+            options.notifyCalendarChanged(getLocalDateKey(minuteRow.timestamp))
           }
         } catch (error) {
           markClassificationJobFailed(job, error)

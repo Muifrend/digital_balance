@@ -91,6 +91,7 @@ const CREATE_CLASSIFICATIONS_TABLE_SQL = `
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     minute_id INTEGER NOT NULL REFERENCES minutes(id),
     minute_timestamp TEXT NOT NULL,
+    planned_block_id INTEGER REFERENCES schedule_blocks(id),
     on_task INTEGER NOT NULL,
     confidence REAL NOT NULL,
     reasoning TEXT,
@@ -118,6 +119,43 @@ const CREATE_CLASSIFICATIONS_VERSION_INDEX_SQL = `
 const CREATE_CLASSIFICATIONS_TIMESTAMP_VERSION_INDEX_SQL = `
   CREATE UNIQUE INDEX IF NOT EXISTS idx_classifications_timestamp_version
   ON classifications(minute_timestamp, model_name, prompt_version, classifier_version, goal_version, corrected);
+`
+
+const CREATE_PROJECTS_TABLE_SQL = `
+  CREATE TABLE IF NOT EXISTS projects (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    description TEXT,
+    color TEXT,
+    archived INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
+`
+
+const CREATE_SCHEDULE_BLOCKS_TABLE_SQL = `
+  CREATE TABLE IF NOT EXISTS schedule_blocks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER REFERENCES projects(id),
+    task_title TEXT NOT NULL,
+    task_description TEXT,
+    goal_seed TEXT,
+    start_at TEXT NOT NULL,
+    end_at TEXT NOT NULL,
+    origin TEXT NOT NULL DEFAULT 'manual',
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
+`
+
+const CREATE_SCHEDULE_BLOCKS_RANGE_INDEX_SQL = `
+  CREATE INDEX IF NOT EXISTS idx_schedule_blocks_range
+  ON schedule_blocks(start_at, end_at);
+`
+
+const CREATE_CLASSIFICATIONS_PLANNED_BLOCK_INDEX_SQL = `
+  CREATE INDEX IF NOT EXISTS idx_classifications_planned_block
+  ON classifications(planned_block_id, minute_timestamp, created_at);
 `
 
 function tableHasColumn(
@@ -203,6 +241,34 @@ export function runDatabaseMigrations(databaseInstance: Database.Database): void
       name: 'expand_classification_jobs_table',
       run: (): void => {
         addColumnIfMissing(databaseInstance, 'classification_jobs', 'goal_version', 'TEXT')
+      }
+    },
+    {
+      id: 7,
+      name: 'create_projects_table',
+      run: (): void => {
+        databaseInstance.exec(CREATE_PROJECTS_TABLE_SQL)
+      }
+    },
+    {
+      id: 8,
+      name: 'create_schedule_blocks_table',
+      run: (): void => {
+        databaseInstance.exec(CREATE_SCHEDULE_BLOCKS_TABLE_SQL)
+        databaseInstance.exec(CREATE_SCHEDULE_BLOCKS_RANGE_INDEX_SQL)
+      }
+    },
+    {
+      id: 9,
+      name: 'expand_classifications_for_planning',
+      run: (): void => {
+        addColumnIfMissing(
+          databaseInstance,
+          'classifications',
+          'planned_block_id',
+          'INTEGER REFERENCES schedule_blocks(id)'
+        )
+        databaseInstance.exec(CREATE_CLASSIFICATIONS_PLANNED_BLOCK_INDEX_SQL)
       }
     }
   ]

@@ -39,6 +39,8 @@ export type ClassificationJobRow = {
   id: number
   minute_timestamp: string
   attempt_count: number
+  payload_json: string
+  goal_version: string | null
 }
 
 export type ExistingClassificationRow = {
@@ -66,6 +68,7 @@ export type PreviousMinuteIngestAfkRow = {
 
 export type ClassificationJobPayload = {
   timestamp: string
+  planned_block_id: number
   timezone_name: string
   utc_offset_minutes: number
   app: string | null
@@ -91,7 +94,9 @@ export type ClassificationJobPayload = {
   classifier_version: string
   goal_version: string
   goal_title: string
-  goal_description: string
+  goal_description: string | null
+  goal_seed: string | null
+  project_name: string | null
 }
 
 export type PersistMinutePayloadResult = {

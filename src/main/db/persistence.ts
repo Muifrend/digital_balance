@@ -8,6 +8,7 @@ import {
   type PersistMinutePayloadResult,
   type PreviousAfkStreakRow
 } from './context'
+import { getLocalDateKey } from './utils'
 import { type MinutePersistencePayload } from '../pipeline/minute'
 
 const MINUTE_MS = 60_000
@@ -25,7 +26,8 @@ export function createPersistence(
     | 'prunePendingJobs'
     | 'hasDueClassificationJob'
     | 'startClassificationWorker'
-  >
+  >,
+  notifyCalendarChanged: (date: string) => void
 ): DatabasePersistence {
   const transaction =
     context.database && context.prepared
@@ -169,6 +171,7 @@ export function createPersistence(
 
     try {
       const result = transaction(payload, logDatabase)
+      notifyCalendarChanged(getLocalDateKey(payload.minuteTimestamp))
       if (result.queuedClassificationJob || classificationQueue.hasDueClassificationJob()) {
         void classificationQueue.startClassificationWorker()
       }
