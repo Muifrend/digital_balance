@@ -197,7 +197,7 @@ Work from the repository root: `/home/andrew/personal_projects/digital_balance`.
       npm run build
 
    Expect success. The main-process bundle should compile with the new channels and DB modules.
-
+10
 4. After implementing the calendar renderer shell, run the app locally.
 
       npm run dev
