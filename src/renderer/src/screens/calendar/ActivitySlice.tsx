@@ -17,13 +17,6 @@ function sliceColors(slice: ActivitySliceType): {
   if (slice.kind === 'afk') {
     return { background: 'var(--sage-100)', borderLeft: '3px solid var(--sage-300)' }
   }
-  if (slice.kind === 'gap') {
-    return {
-      background: 'var(--bg3)',
-      borderLeft: '3px solid transparent',
-      borderStyle: 'dashed'
-    }
-  }
   // activity
   if (slice.needsReview) {
     return { background: 'var(--terra-100)', borderLeft: '3px solid var(--terra-300)' }
@@ -51,12 +44,7 @@ export default function ActivitySlice({
 
   const { background, borderLeft, borderStyle } = sliceColors(slice)
 
-  const label =
-    slice.kind === 'afk'
-      ? 'AFK'
-      : slice.kind === 'gap'
-        ? 'No data'
-        : slice.app ?? '—'
+  const label = slice.kind === 'afk' ? 'AFK' : slice.app ?? '—'
 
   return (
     <div
@@ -93,12 +81,7 @@ export default function ActivitySlice({
           style={{
             fontSize: 11,
             fontWeight: 500,
-            color:
-              slice.kind === 'afk'
-                ? 'var(--sage-500)'
-                : slice.kind === 'gap'
-                  ? 'var(--text-tertiary)'
-                  : 'var(--text-secondary)',
+            color: slice.kind === 'afk' ? 'var(--sage-500)' : 'var(--text-secondary)',
             overflow: 'hidden',
             whiteSpace: 'nowrap',
             textOverflow: 'ellipsis',

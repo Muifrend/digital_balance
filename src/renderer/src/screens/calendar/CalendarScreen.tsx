@@ -359,7 +359,7 @@ export default function CalendarScreen({ pipelineStatus }: CalendarScreenProps):
       {/* Main content area */}
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
         {/* Time grid */}
-        <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
+        <div style={{ flex: 1, overflow: 'hidden', position: 'relative', height: '100%' }}>
           <TimeGrid zoom={zoom} scrollRef={scrollRef}>
             <PlannedLane
               blocks={dayData?.plannedBlocks ?? []}

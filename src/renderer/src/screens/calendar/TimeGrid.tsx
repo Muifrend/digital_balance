@@ -142,7 +142,7 @@ export default function TimeGrid({ zoom, scrollRef, children }: TimeGridProps): 
     <div
       ref={scrollRef}
       style={{
-        flex: 1,
+        height: '100%',
         overflowY: 'auto',
         position: 'relative',
         background: 'var(--bg)'

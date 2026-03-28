@@ -44,15 +44,17 @@ export default function ActivityLane({
         />
       ))}
 
-      {slices.map((slice) => (
-        <ActivitySlice
-          key={slice.id}
-          slice={slice}
-          zoom={zoom}
-          selected={slice.id === selectedSliceId}
-          onClick={onSliceClick}
-        />
-      ))}
+      {slices
+        .filter((slice) => slice.kind !== 'gap')
+        .map((slice) => (
+          <ActivitySlice
+            key={slice.id}
+            slice={slice}
+            zoom={zoom}
+            selected={slice.id === selectedSliceId}
+            onClick={onSliceClick}
+          />
+        ))}
     </div>
   )
 }

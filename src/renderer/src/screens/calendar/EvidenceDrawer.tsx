@@ -250,62 +250,104 @@ export default function EvidenceDrawer({
             </section>
 
             {/* Minute-by-minute list */}
-            {evidence.minutes.length > 0 && (
-              <section>
-                <p
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 600,
-                    letterSpacing: '0.1em',
-                    textTransform: 'uppercase',
-                    color: 'var(--text-tertiary)',
-                    margin: '0 0 6px'
-                  }}
-                >
-                  Minutes
+            <section>
+              <p
+                style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  letterSpacing: '0.1em',
+                  textTransform: 'uppercase',
+                  color: 'var(--text-tertiary)',
+                  margin: '0 0 6px'
+                }}
+              >
+                Minutes
+              </p>
+              {evidence.minutes.length === 0 ? (
+                <p style={{ fontSize: 12, color: 'var(--text-tertiary)', margin: 0 }}>
+                  No minute records captured for this period.
                 </p>
+              ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  {evidence.minutes.map((m) => (
-                    <div
-                      key={m.minuteTimestamp}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 8,
-                        padding: '4px 8px',
-                        borderRadius: 'var(--r-sm)',
-                        background: 'var(--bg)'
-                      }}
-                    >
-                      <span
+                  {evidence.minutes.map((m) => {
+                    // Derive the best available label for what was happening this minute.
+                    // Priority: AFK flag → dominant app → window title → first captured window title → status hint.
+                    const primaryLabel = m.afk
+                      ? 'AFK'
+                      : m.app ?? m.title ?? m.windowTitles[0] ?? null
+
+                    const statusHint =
+                      !primaryLabel
+                        ? m.summaryStatus === 'no_winner'
+                          ? 'No dominant app'
+                          : m.summaryStatus === 'afk'
+                            ? 'AFK'
+                            : 'No capture'
+                        : null
+
+                    // Show a secondary line when there's a title distinct from the app.
+                    const secondaryLabel =
+                      primaryLabel && m.title && m.title !== primaryLabel ? m.title : null
+
+                    return (
+                      <div
+                        key={m.minuteTimestamp}
                         style={{
-                          fontSize: 10,
-                          color: 'var(--text-tertiary)',
-                          fontVariantNumeric: 'tabular-nums',
-                          whiteSpace: 'nowrap',
-                          minWidth: 36
+                          display: 'flex',
+                          alignItems: 'flex-start',
+                          gap: 8,
+                          padding: '4px 8px',
+                          borderRadius: 'var(--r-sm)',
+                          background: 'var(--bg)'
                         }}
                       >
-                        {formatMinute(isoToMinuteOfDay(m.minuteTimestamp))}
-                      </span>
-                      <span
-                        style={{
-                          fontSize: 11,
-                          color: 'var(--text-secondary)',
-                          flex: 1,
-                          overflow: 'hidden',
-                          whiteSpace: 'nowrap',
-                          textOverflow: 'ellipsis'
-                        }}
-                      >
-                        {m.afk ? 'AFK' : m.app ?? '—'}
-                      </span>
-                      <ClassificationBadge onTask={m.onTask} />
-                    </div>
-                  ))}
+                        <span
+                          style={{
+                            fontSize: 10,
+                            color: 'var(--text-tertiary)',
+                            fontVariantNumeric: 'tabular-nums',
+                            whiteSpace: 'nowrap',
+                            minWidth: 36,
+                            paddingTop: 1
+                          }}
+                        >
+                          {formatMinute(isoToMinuteOfDay(m.minuteTimestamp))}
+                        </span>
+                        <div style={{ flex: 1, overflow: 'hidden', minWidth: 0 }}>
+                          <span
+                            style={{
+                              fontSize: 11,
+                              color: primaryLabel ? 'var(--text-secondary)' : 'var(--text-tertiary)',
+                              display: 'block',
+                              overflow: 'hidden',
+                              whiteSpace: 'nowrap',
+                              textOverflow: 'ellipsis'
+                            }}
+                          >
+                            {primaryLabel ?? statusHint}
+                          </span>
+                          {secondaryLabel && (
+                            <span
+                              style={{
+                                fontSize: 10,
+                                color: 'var(--text-tertiary)',
+                                display: 'block',
+                                overflow: 'hidden',
+                                whiteSpace: 'nowrap',
+                                textOverflow: 'ellipsis'
+                              }}
+                            >
+                              {secondaryLabel}
+                            </span>
+                          )}
+                        </div>
+                        <ClassificationBadge onTask={m.onTask} />
+                      </div>
+                    )
+                  })}
                 </div>
-              </section>
-            )}
+              )}
+            </section>
           </>
         )}
       </div>
