@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="240" height="240">
+  <defs>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display&amp;display=swap');
+      .brand-text {
+        font-family: 'DM Serif Display', serif;
+      }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="120" height="120" rx="10" fill="#E4DFD3" />
+
+  <g fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    
+    <line x1="30" y1="75" x2="90" y2="75" stroke="rgba(90, 80, 60, 0.3)" />
+
+    <path d="M 45 75 V 45 M 38 52 l 7 -7 l 7 7" stroke="#4E7249" />
+
+    <path d="M 60 75 V 35 M 51 44 l 9 -9 l 9 9" stroke="#5C6230" />
+
+    <path d="M 75 75 V 55 M 69 61 l 6 -6 l 6 6" stroke="#C9952A" />
+  </g>
+
+  <text class="brand-text" x="60" y="98" font-size="14" font-weight="400" fill="#2A2820" text-anchor="middle">Canopy</text>
+</svg>

@@ -4,6 +4,7 @@ import AnalyticsScreen from './screens/analytics/AnalyticsScreen'
 import CalendarScreen from './screens/calendar/CalendarScreen'
 import FriendsScreen from './screens/friends/FriendsScreen'
 import ProjectsScreen from './screens/projects/ProjectsScreen'
+import SettingsScreen from './screens/settings/SettingsScreen'
 import TopNav, { type NavSection } from './shell/TopNav'
 
 function App(): JSX.Element {
@@ -42,6 +43,7 @@ function App(): JSX.Element {
         {section === 'projects' && <ProjectsScreen />}
         {section === 'analytics' && <AnalyticsScreen />}
         {section === 'friends' && <FriendsScreen />}
+        {section === 'settings' && <SettingsScreen />}
       </div>
     </div>
   )

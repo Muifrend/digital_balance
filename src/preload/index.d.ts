@@ -4,6 +4,7 @@ import type { CalendarApi } from '../shared/calendar'
 import type { CoachingApi } from '../shared/coaching'
 import type { PipelineApi } from '../shared/pipeline'
 import type { ProjectsApi } from '../shared/projects'
+import type { SettingsApi } from '../shared/settings'
 
 declare global {
   interface Window {
@@ -13,6 +14,7 @@ declare global {
       calendar: CalendarApi
       projects: ProjectsApi
       analytics: AnalyticsApi
+      settings: SettingsApi
       coaching: CoachingApi
     }
   }

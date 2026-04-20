@@ -40,11 +40,27 @@ import {
   ANALYTICS_GET_DAY_CHANNEL,
   ANALYTICS_GET_WEEK_CHANNEL
 } from '../shared/analytics'
+import {
+  SETTINGS_GET_CHANNEL,
+  SETTINGS_UPDATE_CHANNEL,
+  maskApiKey,
+  type AppSettings,
+  type SettingsSummary
+} from '../shared/settings'
+import { createSettingsStore, type SettingsStore } from './settings/store'
 import icon from '../../resources/icon.png?asset'
 
 let databaseService: DatabaseService | null = null
 let pipelineService: PipelineService | null = null
 let coachingService: CoachingService | null = null
+let settingsStore: SettingsStore | null = null
+
+function summarizeSettings(settings: AppSettings): SettingsSummary {
+  return {
+    hasOpenAiApiKey: Boolean(settings.openAiApiKey),
+    openAiApiKeyMasked: maskApiKey(settings.openAiApiKey)
+  }
+}
 
 function resolveProjectRoot(): string {
   const candidates = [process.cwd(), app.getAppPath(), join(__dirname, '../..')]
@@ -150,6 +166,26 @@ app.whenReady().then(() => {
   ipcMain.handle(ANALYTICS_GET_WEEK_CHANNEL, (_event, input) =>
     databaseService?.getAnalyticsWeek(input)
   )
+  ipcMain.handle(SETTINGS_GET_CHANNEL, (): SettingsSummary => {
+    const settings = settingsStore?.read() ?? { openAiApiKey: null }
+    return summarizeSettings(settings)
+  })
+  ipcMain.handle(
+    SETTINGS_UPDATE_CHANNEL,
+    (_event, input: { openAiApiKey: string | null }): SettingsSummary => {
+      if (!settingsStore) {
+        throw new Error('Settings store not initialized')
+      }
+
+      const normalizedKey =
+        typeof input?.openAiApiKey === 'string' && input.openAiApiKey.trim().length > 0
+          ? input.openAiApiKey.trim()
+          : null
+      const saved = settingsStore.write({ openAiApiKey: normalizedKey })
+      databaseService?.setOpenAiApiKey(saved.openAiApiKey)
+      return summarizeSettings(saved)
+    }
+  )
   ipcMain.handle(COACHING_GET_ACTIVE_CHANNEL, () => coachingService?.getActivePrompt() ?? null)
   ipcMain.handle(COACHING_CONFIRM_CHANNEL, (_event, input) =>
     coachingService?.confirmPrompt(input.promptId)
@@ -161,11 +197,19 @@ app.whenReady().then(() => {
     coachingService?.redirectPrompt(input)
   )
 
+  settingsStore = createSettingsStore(app.getPath('userData'))
+
   databaseService = createDatabaseService({
     databasePath: join(app.getPath('userData'), 'digital_balance.db'),
     projectRoot: resolveProjectRoot()
   })
   databaseService.initialize()
+
+  const storedSettings = settingsStore.read()
+  if (storedSettings.openAiApiKey) {
+    databaseService.setOpenAiApiKey(storedSettings.openAiApiKey)
+  }
+
   void databaseService.startClassificationWorker()
   databaseService.onCalendarChange((date) => {
     broadcastCalendarChanged(date)

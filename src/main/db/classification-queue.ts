@@ -40,6 +40,7 @@ export type ClassificationQueue = {
   prunePendingJobs: () => number
   hasDueClassificationJob: () => boolean
   startClassificationWorker: () => Promise<void>
+  setOpenAiApiKey: (apiKey: string | null) => void
   stop: () => void
 }
 
@@ -407,6 +408,18 @@ export function createClassificationQueue(
     prunePendingJobs()
   }
 
+  function setOpenAiApiKey(apiKey: string | null): void {
+    const normalized = apiKey && apiKey.trim().length > 0 ? apiKey.trim() : null
+    context.openAiApiKey = normalized
+    if (normalized) {
+      queueMicrotask(() => {
+        void startClassificationWorker()
+      })
+    } else {
+      clearClassificationRetryTimeout()
+    }
+  }
+
   function stop(): void {
     clearClassificationRetryTimeout()
     context.classifying = false
@@ -416,6 +429,7 @@ export function createClassificationQueue(
     initialize,
     buildClassificationJobPayload,
     prunePendingJobs,
+    setOpenAiApiKey,
     hasDueClassificationJob,
     startClassificationWorker,
     stop

@@ -38,12 +38,18 @@ import {
   ANALYTICS_GET_WEEK_CHANNEL,
   type AnalyticsApi
 } from '../shared/analytics'
+import {
+  SETTINGS_GET_CHANNEL,
+  SETTINGS_UPDATE_CHANNEL,
+  type SettingsApi
+} from '../shared/settings'
 
 const api: {
   pipeline: PipelineApi
   calendar: CalendarApi
   projects: ProjectsApi
   analytics: AnalyticsApi
+  settings: SettingsApi
   coaching: CoachingApi
 } = {
   pipeline: {
@@ -89,6 +95,10 @@ const api: {
   analytics: {
     getDay: (input) => ipcRenderer.invoke(ANALYTICS_GET_DAY_CHANNEL, input),
     getWeek: (input) => ipcRenderer.invoke(ANALYTICS_GET_WEEK_CHANNEL, input)
+  },
+  settings: {
+    get: () => ipcRenderer.invoke(SETTINGS_GET_CHANNEL),
+    update: (input) => ipcRenderer.invoke(SETTINGS_UPDATE_CHANNEL, input)
   },
   coaching: {
     getActive: (): Promise<CoachingPrompt | null> =>

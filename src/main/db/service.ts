@@ -82,6 +82,7 @@ export type DatabaseService = {
   getCoachingSnapshot: (input?: { referenceTime?: string }) => CoachingSnapshot
   getAnalyticsDay: (input: { date: string }) => DaySummary
   getAnalyticsWeek: (input: { endDate: string }) => WeekSummary
+  setOpenAiApiKey: (apiKey: string | null) => void
   onCalendarChange: (listener: (date: string) => void) => () => void
   close: () => void
 }
@@ -309,6 +310,10 @@ export function createDatabaseService(options: {
     return analytics.getWeekSummary(input)
   }
 
+  function setOpenAiApiKey(apiKey: string | null): void {
+    classificationQueue?.setOpenAiApiKey(apiKey)
+  }
+
   function onCalendarChange(listener: (date: string) => void): () => void {
     calendarChangeListeners.add(listener)
     return () => {
@@ -360,6 +365,7 @@ export function createDatabaseService(options: {
     getCoachingSnapshot,
     getAnalyticsDay,
     getAnalyticsWeek,
+    setOpenAiApiKey,
     onCalendarChange,
     close
   }
