@@ -20,10 +20,11 @@ export default function TimeRail({ aggregationMinutes }: TimeRailProps): JSX.Ele
         position: 'absolute',
         top: 0,
         left: 0,
-        width: 52,
+        width: 60,
         bottom: 0,
         pointerEvents: 'none',
-        userSelect: 'none'
+        userSelect: 'none',
+        zIndex: 2
       }}
     >
       {Array.from({ length: 24 }, (_, hour) => {

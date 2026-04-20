@@ -29,6 +29,7 @@ import {
 import {
   PROJECTS_ARCHIVE_CHANNEL,
   PROJECTS_CREATE_CHANNEL,
+  PROJECTS_CRITIQUE_DESCRIPTION_CHANNEL,
   PROJECTS_LIST_CHANNEL,
   PROJECTS_UPDATE_CHANNEL,
   type ProjectsApi
@@ -90,7 +91,9 @@ const api: {
     list: () => ipcRenderer.invoke(PROJECTS_LIST_CHANNEL),
     create: (input) => ipcRenderer.invoke(PROJECTS_CREATE_CHANNEL, input),
     update: (input) => ipcRenderer.invoke(PROJECTS_UPDATE_CHANNEL, input),
-    archive: (input) => ipcRenderer.invoke(PROJECTS_ARCHIVE_CHANNEL, input)
+    archive: (input) => ipcRenderer.invoke(PROJECTS_ARCHIVE_CHANNEL, input),
+    critiqueDescription: (input) =>
+      ipcRenderer.invoke(PROJECTS_CRITIQUE_DESCRIPTION_CHANNEL, input)
   },
   analytics: {
     getDay: (input) => ipcRenderer.invoke(ANALYTICS_GET_DAY_CHANNEL, input),

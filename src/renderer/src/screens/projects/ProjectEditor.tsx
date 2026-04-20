@@ -1,5 +1,8 @@
 import { JSX, useEffect, useRef, useState } from 'react'
-import type { ProjectRecord } from '../../../../shared/projects'
+import type {
+  ProjectDescriptionCritique,
+  ProjectRecord
+} from '../../../../shared/projects'
 import CloseButton from '../calendar/CloseButton'
 import SidePanel from '../calendar/SidePanel'
 import { useEscapeKey } from '../calendar/useEscapeKey'
@@ -93,6 +96,8 @@ export default function ProjectEditor({
   const [color, setColor] = useState(initialValues?.color ?? '')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [critique, setCritique] = useState<ProjectDescriptionCritique | null>(null)
+  const [critiquedDescription, setCritiquedDescription] = useState<string | null>(null)
 
   const nameRef = useRef<HTMLInputElement>(null)
   useEffect(() => {
@@ -104,23 +109,72 @@ export default function ProjectEditor({
   const heading = mode === 'edit' ? 'Edit project' : 'New project'
   const canSave = name.trim().length > 0 && description.trim().length > 0
 
+  // When the user has edited the description since the last critique, we keep
+  // the critique card visible (so they can reference the feedback while
+  // revising) but mark the verdict stale — so the button re-runs the AI
+  // instead of silently saving on a now-outdated "sufficient" verdict.
+  const staleCritique =
+    critique !== null && critiquedDescription !== null && critiquedDescription !== description.trim()
+
+  async function savePayload(): Promise<void> {
+    const payload = {
+      name: name.trim(),
+      description: description.trim() || null,
+      color: color.trim() || null
+    }
+    if (mode === 'create' && onCreate) {
+      await onCreate(payload)
+    } else if (mode === 'edit' && onUpdate && initialValues) {
+      await onUpdate({ ...payload, id: initialValues.id })
+    }
+    onClose()
+  }
+
   async function handleSubmit(e: React.FormEvent): Promise<void> {
     e.preventDefault()
     if (!canSave) return
     setSubmitting(true)
     setError(null)
     try {
-      const payload = {
+      // Edit mode: no critique — just save.
+      if (mode === 'edit') {
+        await savePayload()
+        return
+      }
+
+      // Create mode. If we already have a fresh 'sufficient' critique for
+      // exactly this description text, skip the redundant AI call and save.
+      if (critique && !staleCritique && critique.verdict === 'sufficient') {
+        await savePayload()
+        return
+      }
+
+      // Otherwise run (or re-run) the critique.
+      const trimmedDescription = description.trim()
+      const result = await window.api.projects.critiqueDescription({
         name: name.trim(),
-        description: description.trim() || null,
-        color: color.trim() || null
+        description: trimmedDescription
+      })
+      setCritique(result)
+      setCritiquedDescription(trimmedDescription)
+
+      if (result.verdict === 'sufficient') {
+        await savePayload()
+        return
       }
-      if (mode === 'create' && onCreate) {
-        await onCreate(payload)
-      } else if (mode === 'edit' && onUpdate && initialValues) {
-        await onUpdate({ ...payload, id: initialValues.id })
-      }
-      onClose()
+      // Otherwise, stay open and show the feedback.
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Something went wrong')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  async function handleSaveAnyway(): Promise<void> {
+    setSubmitting(true)
+    setError(null)
+    try {
+      await savePayload()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong')
       setSubmitting(false)
@@ -225,6 +279,48 @@ export default function ProjectEditor({
           />
         </div>
 
+        {critique && (
+          <div
+            style={{
+              padding: '12px 14px',
+              borderRadius: 'var(--r-sm)',
+              border: '1px solid',
+              borderColor:
+                critique.verdict === 'sufficient' ? 'var(--olive-300)' : 'var(--amber-300)',
+              background:
+                critique.verdict === 'sufficient' ? 'var(--olive-50)' : 'var(--amber-100)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 4,
+              opacity: staleCritique ? 0.7 : 1
+            }}
+          >
+            <span
+              style={{
+                fontSize: 10,
+                fontWeight: 600,
+                letterSpacing: '0.1em',
+                textTransform: 'uppercase',
+                color:
+                  critique.verdict === 'sufficient' ? 'var(--olive-600)' : 'var(--amber-400)'
+              }}
+            >
+              {critique.verdict === 'sufficient' ? 'Looks good' : 'Could use more detail'}
+              {staleCritique && ' · based on your previous version'}
+            </span>
+            <p
+              style={{
+                margin: 0,
+                fontSize: 12,
+                lineHeight: 1.5,
+                color: 'var(--text-primary)'
+              }}
+            >
+              {critique.feedback}
+            </p>
+          </div>
+        )}
+
         {error && <p style={{ fontSize: 12, color: 'var(--terra-500)', margin: 0 }}>{error}</p>}
 
         <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
@@ -237,8 +333,28 @@ export default function ProjectEditor({
               cursor: submitting || !canSave ? 'not-allowed' : 'pointer'
             }}
           >
-            {submitting ? '…' : mode === 'create' ? 'Create' : 'Save'}
+            {submitting
+              ? '…'
+              : mode === 'edit'
+                ? 'Save'
+                : critique && !staleCritique && critique.verdict === 'sufficient'
+                  ? 'Create'
+                  : critique && !staleCritique && critique.verdict === 'needs_detail'
+                    ? 'Get feedback again'
+                    : critique && staleCritique
+                      ? 'Get feedback again'
+                      : 'Create'}
           </button>
+          {mode === 'create' && critique && critique.verdict === 'needs_detail' && (
+            <button
+              type="button"
+              onClick={() => void handleSaveAnyway()}
+              disabled={submitting}
+              style={btnGhost}
+            >
+              Create anyway
+            </button>
+          )}
           <button type="button" onClick={onClose} style={btnGhost}>
             Cancel
           </button>

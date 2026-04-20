@@ -195,10 +195,10 @@ export default function PlannedBlock({
       <div
         style={{
           position: 'absolute',
-          top: HANDLE_HEIGHT,
+          top: 0,
           left: 0,
           right: 0,
-          bottom: HANDLE_HEIGHT,
+          bottom: 0,
           padding: '2px 6px',
           cursor: 'grab'
         }}

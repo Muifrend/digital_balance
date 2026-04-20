@@ -71,8 +71,8 @@ export default function PlannedLane({
         position: 'absolute',
         top: 0,
         bottom: 0,
-        left: 52, // after time rail
-        width: 'calc(50% - 52px)',
+        left: 60, // after time rail
+        width: 'calc(50% - 60px)',
         borderRight: '1px solid var(--border)',
         cursor: 'crosshair'
       }}

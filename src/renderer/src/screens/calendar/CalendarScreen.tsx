@@ -287,10 +287,10 @@ export default function CalendarScreen({ pipelineStatus }: CalendarScreenProps):
           flexShrink: 0
         }}
       >
-        <div style={{ width: 52, flexShrink: 0 }} />
+        <div style={{ width: 60, flexShrink: 0 }} />
         <div
           style={{
-            flex: '0 0 calc(50% - 52px)',
+            flex: '0 0 calc(50% - 60px)',
             padding: '4px 8px',
             fontSize: 10,
             fontWeight: 600,

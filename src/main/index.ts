@@ -33,9 +33,11 @@ import {
 import {
   PROJECTS_ARCHIVE_CHANNEL,
   PROJECTS_CREATE_CHANNEL,
+  PROJECTS_CRITIQUE_DESCRIPTION_CHANNEL,
   PROJECTS_LIST_CHANNEL,
   PROJECTS_UPDATE_CHANNEL
 } from '../shared/projects'
+import { requestProjectDescriptionCritique } from './project-critique'
 import {
   ANALYTICS_GET_DAY_CHANNEL,
   ANALYTICS_GET_WEEK_CHANNEL
@@ -138,6 +140,24 @@ app.whenReady().then(() => {
   ipcMain.handle(PROJECTS_UPDATE_CHANNEL, (_event, input) => databaseService?.updateProject(input))
   ipcMain.handle(PROJECTS_ARCHIVE_CHANNEL, (_event, input) =>
     databaseService?.archiveProject(input)
+  )
+  ipcMain.handle(
+    PROJECTS_CRITIQUE_DESCRIPTION_CHANNEL,
+    async (_event, input: { name: string; description: string }) => {
+      const apiKey = databaseService?.getOpenAiApiKey() ?? null
+      if (!apiKey) {
+        throw new Error(
+          'No OpenAI API key configured. Add one in Settings to get AI feedback on descriptions.'
+        )
+      }
+
+      const name = typeof input?.name === 'string' ? input.name.trim() : ''
+      const description = typeof input?.description === 'string' ? input.description.trim() : ''
+      if (!name) throw new Error('Project name is required.')
+      if (!description) throw new Error('Description is required.')
+
+      return requestProjectDescriptionCritique({ apiKey, name, description })
+    }
   )
   ipcMain.handle(CALENDAR_GET_DAY_CHANNEL, (_event, input) =>
     databaseService?.getDayViewData(input)

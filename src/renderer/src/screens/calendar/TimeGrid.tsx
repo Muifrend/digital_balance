@@ -126,7 +126,7 @@ function CurrentTimeLine({
       <div
         style={{
           position: 'absolute',
-          left: 44,
+          left: 52,
           top: '50%',
           transform: 'translateY(-50%)',
           width: 8,
