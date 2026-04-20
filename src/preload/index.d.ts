@@ -1,4 +1,5 @@
 import { ElectronAPI } from '@electron-toolkit/preload'
+import type { AnalyticsApi } from '../shared/analytics'
 import type { CalendarApi } from '../shared/calendar'
 import type { CoachingApi } from '../shared/coaching'
 import type { PipelineApi } from '../shared/pipeline'
@@ -11,6 +12,7 @@ declare global {
       pipeline: PipelineApi
       calendar: CalendarApi
       projects: ProjectsApi
+      analytics: AnalyticsApi
       coaching: CoachingApi
     }
   }

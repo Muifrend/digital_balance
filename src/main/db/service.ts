@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3'
+import type { DaySummary, WeekSummary } from '../../shared/analytics'
 import type {
   ActivityEvidence,
   AggregationWindowMinutes,
@@ -10,6 +11,7 @@ import {
   type MinutePersistencePayload,
   type RebuildMinutesProjectionOptions
 } from '../pipeline/minute'
+import { createAnalyticsDatabase, type AnalyticsDatabase } from './analytics'
 import { createClassificationQueue, type ClassificationQueue } from './classification-queue'
 import { createDatabaseContext } from './context'
 import { createDayViewDatabase, type CoachingSnapshot, type DayViewDatabase } from './day-view'
@@ -78,6 +80,8 @@ export type DatabaseService = {
   }) => ActivityEvidence
   confirmOnTask: (input: { startAt: string; endAt: string }) => void
   getCoachingSnapshot: (input?: { referenceTime?: string }) => CoachingSnapshot
+  getAnalyticsDay: (input: { date: string }) => DaySummary
+  getAnalyticsWeek: (input: { endDate: string }) => WeekSummary
   onCalendarChange: (listener: (date: string) => void) => () => void
   close: () => void
 }
@@ -93,6 +97,7 @@ export function createDatabaseService(options: {
   let projectionRebuild: ProjectionRebuild | null = null
   let planning: PlanningDatabase | null = null
   let dayView: DayViewDatabase | null = null
+  let analytics: AnalyticsDatabase | null = null
 
   function notifyCalendarChanged(date: string): void {
     for (const listener of calendarChangeListeners) {
@@ -120,6 +125,7 @@ export function createDatabaseService(options: {
       persistence = createPersistence(context, classificationQueue, notifyCalendarChanged)
       projectionRebuild = createProjectionRebuild(context, persistence)
       dayView = createDayViewDatabase(context, planning)
+      analytics = createAnalyticsDatabase(context)
     } catch (error) {
       console.error('[db] Failed to initialize database:', error)
       classificationQueue?.stop()
@@ -131,6 +137,7 @@ export function createDatabaseService(options: {
       projectionRebuild = null
       planning = null
       dayView = null
+      analytics = null
     }
   }
 
@@ -286,6 +293,22 @@ export function createDatabaseService(options: {
     return dayView.getCoachingSnapshot(input)
   }
 
+  function getAnalyticsDay(input: { date: string }): DaySummary {
+    if (!analytics) {
+      throw new Error('Database not initialized')
+    }
+
+    return analytics.getDaySummary(input)
+  }
+
+  function getAnalyticsWeek(input: { endDate: string }): WeekSummary {
+    if (!analytics) {
+      throw new Error('Database not initialized')
+    }
+
+    return analytics.getWeekSummary(input)
+  }
+
   function onCalendarChange(listener: (date: string) => void): () => void {
     calendarChangeListeners.add(listener)
     return () => {
@@ -313,6 +336,7 @@ export function createDatabaseService(options: {
       projectionRebuild = null
       planning = null
       dayView = null
+      analytics = null
     }
   }
 
@@ -334,6 +358,8 @@ export function createDatabaseService(options: {
     getActivityEvidence,
     confirmOnTask,
     getCoachingSnapshot,
+    getAnalyticsDay,
+    getAnalyticsWeek,
     onCalendarChange,
     close
   }

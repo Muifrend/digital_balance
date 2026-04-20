@@ -1,6 +1,6 @@
 import { JSX } from 'react'
 
-export type NavSection = 'calendar' | 'projects' | 'friends'
+export type NavSection = 'calendar' | 'projects' | 'analytics' | 'friends'
 
 type TopNavProps = {
   active: NavSection
@@ -30,6 +30,7 @@ export default function TopNav({ active, onChange }: TopNavProps): JSX.Element {
   const sections: Array<{ key: NavSection; label: string }> = [
     { key: 'calendar', label: 'Calendar' },
     { key: 'projects', label: 'Projects' },
+    { key: 'analytics', label: 'Analytics' },
     { key: 'friends', label: 'Friends' }
   ]
 

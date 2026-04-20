@@ -1,5 +1,6 @@
 import { JSX, useEffect, useState } from 'react'
 import { createInitialPipelineStatus, type PipelineStatus } from '../../shared/pipeline'
+import AnalyticsScreen from './screens/analytics/AnalyticsScreen'
 import CalendarScreen from './screens/calendar/CalendarScreen'
 import FriendsScreen from './screens/friends/FriendsScreen'
 import ProjectsScreen from './screens/projects/ProjectsScreen'
@@ -39,6 +40,7 @@ function App(): JSX.Element {
       <div style={{ flex: 1, overflow: 'hidden' }}>
         {section === 'calendar' && <CalendarScreen pipelineStatus={pipelineStatus} />}
         {section === 'projects' && <ProjectsScreen />}
+        {section === 'analytics' && <AnalyticsScreen />}
         {section === 'friends' && <FriendsScreen />}
       </div>
     </div>

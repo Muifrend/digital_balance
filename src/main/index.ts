@@ -36,6 +36,10 @@ import {
   PROJECTS_LIST_CHANNEL,
   PROJECTS_UPDATE_CHANNEL
 } from '../shared/projects'
+import {
+  ANALYTICS_GET_DAY_CHANNEL,
+  ANALYTICS_GET_WEEK_CHANNEL
+} from '../shared/analytics'
 import icon from '../../resources/icon.png?asset'
 
 let databaseService: DatabaseService | null = null
@@ -139,6 +143,12 @@ app.whenReady().then(() => {
   )
   ipcMain.handle(CALENDAR_CONFIRM_ON_TASK_CHANNEL, (_event, input) =>
     databaseService?.confirmOnTask(input)
+  )
+  ipcMain.handle(ANALYTICS_GET_DAY_CHANNEL, (_event, input) =>
+    databaseService?.getAnalyticsDay(input)
+  )
+  ipcMain.handle(ANALYTICS_GET_WEEK_CHANNEL, (_event, input) =>
+    databaseService?.getAnalyticsWeek(input)
   )
   ipcMain.handle(COACHING_GET_ACTIVE_CHANNEL, () => coachingService?.getActivePrompt() ?? null)
   ipcMain.handle(COACHING_CONFIRM_CHANNEL, (_event, input) =>

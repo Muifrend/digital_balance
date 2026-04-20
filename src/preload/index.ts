@@ -33,11 +33,17 @@ import {
   PROJECTS_UPDATE_CHANNEL,
   type ProjectsApi
 } from '../shared/projects'
+import {
+  ANALYTICS_GET_DAY_CHANNEL,
+  ANALYTICS_GET_WEEK_CHANNEL,
+  type AnalyticsApi
+} from '../shared/analytics'
 
 const api: {
   pipeline: PipelineApi
   calendar: CalendarApi
   projects: ProjectsApi
+  analytics: AnalyticsApi
   coaching: CoachingApi
 } = {
   pipeline: {
@@ -79,6 +85,10 @@ const api: {
     create: (input) => ipcRenderer.invoke(PROJECTS_CREATE_CHANNEL, input),
     update: (input) => ipcRenderer.invoke(PROJECTS_UPDATE_CHANNEL, input),
     archive: (input) => ipcRenderer.invoke(PROJECTS_ARCHIVE_CHANNEL, input)
+  },
+  analytics: {
+    getDay: (input) => ipcRenderer.invoke(ANALYTICS_GET_DAY_CHANNEL, input),
+    getWeek: (input) => ipcRenderer.invoke(ANALYTICS_GET_WEEK_CHANNEL, input)
   },
   coaching: {
     getActive: (): Promise<CoachingPrompt | null> =>
