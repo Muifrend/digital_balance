@@ -1,6 +1,7 @@
 import { JSX, useEffect, useState } from 'react'
 import { createInitialPipelineStatus, type PipelineStatus } from '../../shared/pipeline'
 import CalendarScreen from './screens/calendar/CalendarScreen'
+import FriendsScreen from './screens/friends/FriendsScreen'
 import ProjectsScreen from './screens/projects/ProjectsScreen'
 import TopNav, { type NavSection } from './shell/TopNav'
 
@@ -36,11 +37,9 @@ function App(): JSX.Element {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
       <TopNav active={section} onChange={setSection} />
       <div style={{ flex: 1, overflow: 'hidden' }}>
-        {section === 'calendar' ? (
-          <CalendarScreen pipelineStatus={pipelineStatus} />
-        ) : (
-          <ProjectsScreen />
-        )}
+        {section === 'calendar' && <CalendarScreen pipelineStatus={pipelineStatus} />}
+        {section === 'projects' && <ProjectsScreen />}
+        {section === 'friends' && <FriendsScreen />}
       </div>
     </div>
   )
