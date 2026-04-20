@@ -97,6 +97,7 @@ export type ClassificationJobPayload = {
   goal_description: string | null
   goal_seed: string | null
   project_name: string | null
+  project_description: string | null
 }
 
 export type PersistMinutePayloadResult = {

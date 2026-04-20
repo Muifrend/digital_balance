@@ -211,7 +211,7 @@ export default function CalendarScreen({ pipelineStatus }: CalendarScreenProps):
   // ─── Render ──────────────────────────────────────────────────────────────
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: 'var(--bg)', overflow: 'hidden' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--bg)', overflow: 'hidden' }}>
       {/* Coaching banner */}
       {activePrompt && (
         <CoachingBanner

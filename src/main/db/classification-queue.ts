@@ -102,12 +102,14 @@ export function createClassificationQueue(
         taskTitle: plannedContext.taskTitle,
         taskDescription: plannedContext.taskDescription,
         goalSeed: plannedContext.goalSeed,
-        projectName: plannedContext.projectName
+        projectName: plannedContext.projectName,
+        projectDescription: plannedContext.projectDescription
       }),
       goal_title: plannedContext.taskTitle,
       goal_description: plannedContext.taskDescription,
       goal_seed: plannedContext.goalSeed,
-      project_name: plannedContext.projectName
+      project_name: plannedContext.projectName,
+      project_description: plannedContext.projectDescription
     }
   }
 
@@ -182,7 +184,8 @@ export function createClassificationQueue(
       goalTitle: payload.goal_title,
       goalDescription: payload.goal_description,
       goalSeed: payload.goal_seed,
-      projectName: payload.project_name
+      projectName: payload.project_name,
+      projectDescription: payload.project_description ?? null
     })
 
     return fetch('https://api.openai.com/v1/chat/completions', {

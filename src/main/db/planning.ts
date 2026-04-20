@@ -221,6 +221,7 @@ export function createPlanningDatabase(
       schedule_blocks.id,
       schedule_blocks.project_id,
       projects.name AS project_name,
+      projects.description AS project_description,
       projects.color AS project_color,
       schedule_blocks.task_title,
       schedule_blocks.task_description,
@@ -520,6 +521,7 @@ export function createPlanningDatabase(
       blockId: row.id,
       projectId: row.project_id,
       projectName: row.project_name,
+      projectDescription: row.project_description,
       projectColor: row.project_color,
       taskTitle: row.task_title,
       taskDescription: row.task_description,
@@ -553,7 +555,8 @@ export function createPlanningDatabase(
         taskTitle: plannedContext.taskTitle,
         taskDescription: plannedContext.taskDescription,
         goalSeed: plannedContext.goalSeed,
-        projectName: plannedContext.projectName
+        projectName: plannedContext.projectName,
+        projectDescription: plannedContext.projectDescription
       })
 
       insertCorrectedClassificationStatement.run(

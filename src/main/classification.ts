@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
 
 export const OPENAI_MODEL = 'gpt-4o-mini'
-export const PROMPT_VERSION = 'on-task-v1'
+export const PROMPT_VERSION = 'on-task-v2'
 export const CLASSIFIER_VERSION = 'openai-on-task-v1'
 
 export type ClassificationRequestInput = {
@@ -14,6 +14,7 @@ export type ClassificationRequestInput = {
   goalDescription: string | null
   goalSeed: string | null
   projectName: string | null
+  projectDescription: string | null
 }
 
 export type ParsedClassificationResponse = {
@@ -74,8 +75,15 @@ export function buildClassificationRequest(input: ClassificationRequestInput): {
   userPrompt: string
   body: OpenAiChatCompletionRequestBody
 } {
-  const systemPrompt =
-    "You are a productivity classifier. Given a computer activity record and the user's current goal, respond with JSON only. No markdown, no explanation, just raw JSON."
+  const systemPrompt = `You are a productivity classifier. Given an activity record and the user's current project and task, decide whether the activity is plausibly in service of the goal.
+
+Guidelines:
+- Reading code, browsing docs, using terminals, searching the web, consulting AI assistants, and reviewing output all count as on-task when the project is work of that kind (coding, writing, research, etc.). Do not require active typing — a minute of reading is still on-task.
+- Only mark off-task when the app or window title is clearly unrelated to the project (e.g. social media, unrelated video content, games, personal browsing).
+- If the activity could plausibly support the project, prefer on-task with moderate confidence rather than off-task.
+- Confidence reflects how clearly the activity matches or mismatches the goal, not how actively the user is working.
+
+Respond with JSON only. No markdown, no explanation, just raw JSON.`
 
   const userPrompt = `Classify this minute of computer activity.
 
@@ -89,6 +97,7 @@ Current goal: ${input.goalTitle}
 Goal description: ${input.goalDescription ?? 'null'}
 Goal seed: ${input.goalSeed ?? 'null'}
 Project name: ${input.projectName ?? 'null'}
+Project description: ${input.projectDescription ?? 'null'}
 
 Respond with exactly this JSON shape:
 {

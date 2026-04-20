@@ -16,6 +16,7 @@ export type ScheduleBlockRow = {
   id: number
   project_id: number | null
   project_name: string | null
+  project_description: string | null
   project_color: string | null
   task_title: string
   task_description: string | null
@@ -31,6 +32,7 @@ export type PlannedContext = {
   blockId: number
   projectId: number | null
   projectName: string | null
+  projectDescription: string | null
   projectColor: string | null
   taskTitle: string
   taskDescription: string | null
@@ -125,6 +127,7 @@ export function buildGoalVersion(input: {
   taskDescription: string | null
   goalSeed: string | null
   projectName: string | null
+  projectDescription: string | null
 }): string {
   const hash = createHash('sha1')
     .update(
@@ -132,7 +135,8 @@ export function buildGoalVersion(input: {
         taskTitle: input.taskTitle,
         taskDescription: input.taskDescription,
         goalSeed: input.goalSeed,
-        projectName: input.projectName
+        projectName: input.projectName,
+        projectDescription: input.projectDescription
       })
     )
     .digest('hex')
