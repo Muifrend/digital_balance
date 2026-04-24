@@ -117,12 +117,18 @@ npm run build:mac
 npm run build:linux
 ```
 
-`npm run build:mac` now downloads a pinned official ActivityWatch macOS release, stages the bundled `ActivityWatch.app` under `resources/activitywatch/macos`, and then builds the Canopy DMG.
+`npm run build:mac` now downloads a pinned official ActivityWatch macOS release, stages the bundled `ActivityWatch.app` under `resources/activitywatch/macos`, and then builds the Canopy DMG. The beta build defaults to `MAC_BUILD_ARCH=x64` so the packaged Canopy app matches the currently bundled ActivityWatch architecture.
 
 To override the bundled ActivityWatch release for a one-off local build:
 
 ```bash
 ACTIVITYWATCH_VERSION=v0.13.2 npm run build:mac
+```
+
+To override the packaged macOS architecture for a one-off local build:
+
+```bash
+MAC_BUILD_ARCH=x64 npm run build:mac
 ```
 
 The repo also includes a GitHub Actions workflow at `.github/workflows/release-macos-dmg.yml` that builds and publishes the private-beta DMG on tag pushes. It accepts an optional `ACTIVITYWATCH_VERSION` repository variable or `workflow_dispatch` input to pin a different upstream ActivityWatch release without changing the script.
@@ -142,6 +148,12 @@ To test a specific upstream ActivityWatch release:
 
 ```bash
 ACTIVITYWATCH_VERSION=v0.13.2 npm run build:mac
+```
+
+To test a specific packaged architecture:
+
+```bash
+MAC_BUILD_ARCH=x64 npm run build:mac
 ```
 
 ### 2. Verify the build output

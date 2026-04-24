@@ -7,6 +7,7 @@ import { dirname, join, relative, resolve } from 'path'
 import { fileURLToPath } from 'url'
 
 const DEFAULT_ACTIVITYWATCH_VERSION = 'v0.13.2'
+const DEFAULT_MAC_BUILD_ARCH = 'x64'
 const ACTIVITYWATCH_REPO = 'ActivityWatch/activitywatch'
 const REQUIRED_BINARY_NAMES = ['aw-watcher-window', 'aw-watcher-afk']
 const SERVER_BINARY_CANDIDATES = ['aw-server', 'aw-server-rust']
@@ -16,6 +17,7 @@ const repoRoot = resolve(dirname(scriptPath), '..')
 const stageRoot = join(repoRoot, 'resources', 'activitywatch', 'macos')
 const activityWatchVersion =
   process.argv[2] || process.env.ACTIVITYWATCH_VERSION || DEFAULT_ACTIVITYWATCH_VERSION
+const macBuildArch = normalizeMacBuildArch(process.env.MAC_BUILD_ARCH || DEFAULT_MAC_BUILD_ARCH)
 
 function log(message) {
   console.log(`[prepare-activitywatch-macos] ${message}`)
@@ -23,6 +25,20 @@ function log(message) {
 
 function fail(message) {
   throw new Error(message)
+}
+
+function normalizeMacBuildArch(value) {
+  const normalized = value.trim().toLowerCase()
+
+  if (normalized === 'x64' || normalized === 'x86_64') {
+    return 'x64'
+  }
+
+  if (normalized === 'arm64' || normalized === 'aarch64') {
+    return 'arm64'
+  }
+
+  fail(`Unsupported MAC_BUILD_ARCH "${value}". Expected "x64" or "arm64".`)
 }
 
 function run(command, args, options = {}) {
@@ -62,6 +78,47 @@ function findBinary(rootDir, candidates) {
     }
   }
   return null
+}
+
+function assetNameContainsArch(name, arch) {
+  const normalized = name.toLowerCase()
+
+  if (arch === 'x64') {
+    return /(?:^|[-_.])(x64|x86_64)(?:[-_.]|$)/.test(normalized)
+  }
+
+  return /(?:^|[-_.])(arm64|aarch64)(?:[-_.]|$)/.test(normalized)
+}
+
+function assetNameIsUniversal(name) {
+  return /(?:^|[-_.])universal(?:[-_.]|$)/i.test(name)
+}
+
+function assetNameHasExplicitArch(name) {
+  return /(?:^|[-_.])(x64|x86_64|arm64|aarch64|universal)(?:[-_.]|$)/i.test(name)
+}
+
+function selectMacDmgAsset(assets, arch) {
+  const exactMatch = assets.find((asset) => assetNameContainsArch(asset.name, arch))
+  if (exactMatch) {
+    return exactMatch
+  }
+
+  const universalMatch = assets.find((asset) => assetNameIsUniversal(asset.name))
+  if (universalMatch) {
+    return universalMatch
+  }
+
+  const genericMatch = assets.find((asset) => !assetNameHasExplicitArch(asset.name))
+  if (genericMatch) {
+    return genericMatch
+  }
+
+  const availableNames = assets.map((asset) => asset.name).join(', ')
+  fail(
+    `No macOS DMG asset compatible with MAC_BUILD_ARCH=${arch} was found for ` +
+      `${activityWatchVersion}. Available DMGs: ${availableNames}`
+  )
 }
 
 async function fetchJson(url) {
@@ -118,7 +175,7 @@ async function main() {
     fail('This script must run on macOS so it can mount the upstream ActivityWatch DMG.')
   }
 
-  log(`Using ActivityWatch release ${activityWatchVersion}`)
+  log(`Using ActivityWatch release ${activityWatchVersion} for MAC_BUILD_ARCH=${macBuildArch}`)
 
   const release = await fetchJson(
     `https://api.github.com/repos/${ACTIVITYWATCH_REPO}/releases/tags/${encodeURIComponent(activityWatchVersion)}`
@@ -129,8 +186,7 @@ async function main() {
     fail(`No macOS DMG asset found for ActivityWatch release ${activityWatchVersion}.`)
   }
 
-  const dmgAsset =
-    dmgAssets.find((asset) => /mac|darwin|osx|universal/i.test(asset.name)) ?? dmgAssets[0]
+  const dmgAsset = selectMacDmgAsset(dmgAssets, macBuildArch)
   const tempRoot = join(tmpdir(), `canopy-activitywatch-${Date.now()}`)
   const dmgPath = join(tempRoot, dmgAsset.name)
   const mountPath = join(tempRoot, 'mount')
@@ -168,7 +224,10 @@ async function main() {
 
     const stagedAppBundlePath = join(stageRoot, 'ActivityWatch.app')
     log('Copying ActivityWatch.app into macOS staging resources')
-    cpSync(appBundlePath, stagedAppBundlePath, { recursive: true })
+    cpSync(appBundlePath, stagedAppBundlePath, {
+      recursive: true,
+      verbatimSymlinks: true
+    })
 
     const stagedServerBinaryPath = join(
       stagedAppBundlePath,

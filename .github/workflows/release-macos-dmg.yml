@@ -20,6 +20,7 @@ jobs:
     env:
       DEFAULT_ACTIVITYWATCH_VERSION: v0.13.2
       REPO_ACTIVITYWATCH_VERSION: ${{ vars.ACTIVITYWATCH_VERSION }}
+      MAC_BUILD_ARCH: x64
 
     steps:
       - name: Check out repository
@@ -46,6 +47,7 @@ jobs:
       - name: Build macOS DMG
         env:
           ACTIVITYWATCH_VERSION: ${{ steps.activitywatch.outputs.value }}
+          MAC_BUILD_ARCH: ${{ env.MAC_BUILD_ARCH }}
         run: npm run build:mac
 
       - name: Locate DMG artifact
@@ -75,6 +77,7 @@ jobs:
             Private beta DMG for Canopy on macOS.
 
             Bundled ActivityWatch release: `${{ steps.activitywatch.outputs.value }}`
+            Packaged architecture: `${{ env.MAC_BUILD_ARCH }}`
 
             Known limitations:
             - This beta DMG is unsigned and not notarized.
