@@ -18,6 +18,7 @@ const stageRoot = join(repoRoot, 'resources', 'activitywatch', 'macos')
 const activityWatchVersion =
   process.argv[2] || process.env.ACTIVITYWATCH_VERSION || DEFAULT_ACTIVITYWATCH_VERSION
 const macBuildArch = normalizeMacBuildArch(process.env.MAC_BUILD_ARCH || DEFAULT_MAC_BUILD_ARCH)
+const githubToken = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || null
 
 function log(message) {
   console.log(`[prepare-activitywatch-macos] ${message}`)
@@ -127,15 +128,15 @@ async function fetchJson(url) {
     'User-Agent': 'canopy-build-prep'
   }
 
-  if (process.env.GITHUB_TOKEN) {
-    headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`
+  if (githubToken) {
+    headers.Authorization = `Bearer ${githubToken}`
   }
 
   const response = await fetch(url, { headers })
   if (!response.ok) {
     fail(
       `GitHub API returned ${response.status} for ${url}. ` +
-        `Set ACTIVITYWATCH_VERSION to a valid tag or provide GITHUB_TOKEN if rate limited.`
+        `Set ACTIVITYWATCH_VERSION to a valid tag or provide GITHUB_TOKEN/GH_TOKEN if rate limited.`
     )
   }
 

@@ -48,6 +48,7 @@ jobs:
         env:
           ACTIVITYWATCH_VERSION: ${{ steps.activitywatch.outputs.value }}
           MAC_BUILD_ARCH: ${{ env.MAC_BUILD_ARCH }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: npm run build:mac
 
       - name: Locate DMG artifact
