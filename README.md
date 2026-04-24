@@ -127,6 +127,78 @@ ACTIVITYWATCH_VERSION=v0.13.2 npm run build:mac
 
 The repo also includes a GitHub Actions workflow at `.github/workflows/release-macos-dmg.yml` that builds and publishes the private-beta DMG on tag pushes. It accepts an optional `ACTIVITYWATCH_VERSION` repository variable or `workflow_dispatch` input to pin a different upstream ActivityWatch release without changing the script.
 
+## macOS Build And Test
+
+Run these steps on a real Mac. The macOS prep script uses `hdiutil`, so it will not work on Linux or Windows.
+
+### 1. Build the DMG locally
+
+```bash
+npm ci
+npm run build:mac
+```
+
+To test a specific upstream ActivityWatch release:
+
+```bash
+ACTIVITYWATCH_VERSION=v0.13.2 npm run build:mac
+```
+
+### 2. Verify the build output
+
+Confirm the DMG exists:
+
+```bash
+find dist -maxdepth 1 -name '*.dmg' -print
+```
+
+Confirm the packaged app contains the staged macOS ActivityWatch bundle:
+
+```bash
+find dist -path '*Canopy.app/Contents/Resources/resources/activitywatch/macos*' -maxdepth 6 -print
+```
+
+### 3. Smoke test the installed app
+
+1. Open the DMG from `dist/`.
+2. Drag `Canopy.app` into `/Applications`.
+3. Launch it from Finder.
+4. Verify ActivityWatch came up:
+
+```bash
+curl -sS http://localhost:5600/api/0/buckets
+```
+
+You should see bucket IDs that include `aw-watcher-window` and `aw-watcher-afk`.
+
+### 4. Verify the two main macOS runtime cases
+
+- Fresh machine case: no ActivityWatch running beforehand, then open Canopy and confirm the bundled watchers create buckets.
+- Reuse case: start a healthy local ActivityWatch server first, then open Canopy and confirm Canopy reuses it instead of failing on missing bundled resources.
+
+### 5. Verify macOS permission behavior
+
+1. Launch Canopy without Accessibility permission granted.
+2. Confirm the app opens, but window titles may be missing or incomplete.
+3. Grant Accessibility permission to `Canopy.app`.
+4. Quit and reopen the app.
+5. Confirm window titles now populate correctly.
+
+### 6. Test the GitHub release workflow
+
+You can test the CI path either by using `workflow_dispatch` for `.github/workflows/release-macos-dmg.yml` or by pushing a version tag:
+
+```bash
+git tag v0.1.0-beta.1
+git push origin v0.1.0-beta.1
+```
+
+For CI runs, confirm that:
+
+- the workflow uploads a DMG artifact
+- tag-triggered runs create a prerelease with the DMG attached
+- the release notes mention the pinned ActivityWatch version used for that build
+
 ## Local Data
 
 The app database is stored in Electron user data, not in the repo. On Linux that is typically:
