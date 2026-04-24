@@ -1,0 +1,83 @@
+name: Release macOS DMG
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      activitywatch_version:
+        description: Pinned ActivityWatch release tag to bundle into the beta DMG
+        required: false
+        default: v0.13.2
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos-dmg:
+    runs-on: macos-latest
+    env:
+      DEFAULT_ACTIVITYWATCH_VERSION: v0.13.2
+      REPO_ACTIVITYWATCH_VERSION: ${{ vars.ACTIVITYWATCH_VERSION }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Resolve pinned ActivityWatch version
+        id: activitywatch
+        run: |
+          VERSION="${{ github.event.inputs.activitywatch_version }}"
+          if [ -z "$VERSION" ]; then
+            VERSION="${REPO_ACTIVITYWATCH_VERSION:-$DEFAULT_ACTIVITYWATCH_VERSION}"
+          fi
+          echo "value=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Build macOS DMG
+        env:
+          ACTIVITYWATCH_VERSION: ${{ steps.activitywatch.outputs.value }}
+        run: npm run build:mac
+
+      - name: Locate DMG artifact
+        id: dmg
+        run: |
+          DMG_PATH="$(find dist -maxdepth 1 -name '*.dmg' -print -quit)"
+          if [ -z "$DMG_PATH" ]; then
+            echo "No .dmg artifact found in dist/"
+            exit 1
+          fi
+          echo "path=$DMG_PATH" >> "$GITHUB_OUTPUT"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: canopy-macos-dmg
+          path: ${{ steps.dmg.outputs.path }}
+          if-no-files-found: error
+
+      - name: Publish GitHub release asset
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          prerelease: true
+          generate_release_notes: true
+          body: |
+            Private beta DMG for Canopy on macOS.
+
+            Bundled ActivityWatch release: `${{ steps.activitywatch.outputs.value }}`
+
+            Known limitations:
+            - This beta DMG is unsigned and not notarized.
+            - macOS may require an extra "Open" confirmation on first launch.
+            - Window titles require Accessibility permission for complete tracking.
+          files: ${{ steps.dmg.outputs.path }}

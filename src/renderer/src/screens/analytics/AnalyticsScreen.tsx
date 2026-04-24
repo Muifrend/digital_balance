@@ -42,6 +42,7 @@ export default function AnalyticsScreen(): JSX.Element {
       }}
     >
       <header
+        data-demo-anchor="analytics-header"
         style={{
           padding: '16px 24px',
           borderBottom: '1px solid var(--border)',

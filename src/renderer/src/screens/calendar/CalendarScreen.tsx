@@ -280,6 +280,7 @@ export default function CalendarScreen({ pipelineStatus }: CalendarScreenProps):
       {/* Lane column labels */}
       <div
         aria-hidden="true"
+        data-demo-anchor="calendar-overview"
         style={{
           display: 'flex',
           borderBottom: '1px solid var(--border)',

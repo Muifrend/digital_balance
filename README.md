@@ -13,7 +13,7 @@ Canopy is a local-first desktop app for planning your day against what your comp
 ## Requirements
 
 - Node.js and npm
-- A local ActivityWatch bundle placed under `resources/activitywatch/<platform>`
+- For source-based development, either a local ActivityWatch bundle placed under `resources/activitywatch/<platform>` or an already-running local ActivityWatch server
 - An optional repo-root `.env` file with `OPENAI_API_KEY` if you want automatic on-task classification and coaching
 
 ## Install
@@ -22,11 +22,30 @@ Canopy is a local-first desktop app for planning your day against what your comp
 npm install
 ```
 
+## macOS Beta Install
+
+Private beta builds are published as DMGs through GitHub Releases.
+
+1. Download the latest `Canopy-*.dmg` from Releases.
+2. Drag `Canopy.app` into `/Applications`.
+3. Open the app from Finder. Because this beta is unsigned and not notarized, macOS may require an extra confirmation step on first launch.
+4. If window titles are missing, grant Accessibility permission to `Canopy.app`, then quit and reopen the app.
+
+Known limitations for the beta DMG:
+
+- the app is unsigned and not notarized
+- there is no in-app auto-update flow yet
+- missing macOS Accessibility permission can still allow app detection but not full window-title tracking
+
 ## ActivityWatch Setup
 
 Canopy does not collect raw activity by itself. It starts or reuses local ActivityWatch services and reads data from the ActivityWatch API at `http://localhost:5600`.
 
-Right now, the app expects an unpacked ActivityWatch bundle inside this repo even if you already have ActivityWatch running separately. The current startup code resolves the bundle path before it checks whether an ActivityWatch server is already healthy.
+The private beta DMG bundles a pinned ActivityWatch build automatically. The manual setup below is only required when you run Canopy directly from source.
+
+On startup, Canopy first checks whether a local ActivityWatch server is already healthy at `http://localhost:5600`. If one is already running, Canopy reuses it.
+
+If no healthy local ActivityWatch server is running, Canopy falls back to a bundled ActivityWatch layout under this repo:
 
 Create one of these platform folders:
 
@@ -58,6 +77,8 @@ chmod +x resources/activitywatch/<platform>/aw-server/aw-server
 chmod +x resources/activitywatch/<platform>/aw-watcher-window/aw-watcher-window
 chmod +x resources/activitywatch/<platform>/aw-watcher-afk/aw-watcher-afk
 ```
+
+On macOS, window-title capture may also require Accessibility permission for the process doing the tracking. If permission is missing, ActivityWatch may still see the active app but not the window title.
 
 ## OpenAI Setup
 
@@ -96,6 +117,16 @@ npm run build:mac
 npm run build:linux
 ```
 
+`npm run build:mac` now downloads a pinned official ActivityWatch macOS release, stages the bundled `ActivityWatch.app` under `resources/activitywatch/macos`, and then builds the Canopy DMG.
+
+To override the bundled ActivityWatch release for a one-off local build:
+
+```bash
+ACTIVITYWATCH_VERSION=v0.13.2 npm run build:mac
+```
+
+The repo also includes a GitHub Actions workflow at `.github/workflows/release-macos-dmg.yml` that builds and publishes the private-beta DMG on tag pushes. It accepts an optional `ACTIVITYWATCH_VERSION` repository variable or `workflow_dispatch` input to pin a different upstream ActivityWatch release without changing the script.
+
 ## Local Data
 
 The app database is stored in Electron user data, not in the repo. On Linux that is typically:
@@ -120,7 +151,7 @@ Why:
 The better approach is:
 
 - keep the expected folder layout documented in this README
-- download or unpack the correct bundle per platform during setup
+- download or unpack the correct bundle per platform during setup, or fetch it during CI/build prep
 - include the binaries in release artifacts, not in the repo itself
 
 ## Troubleshooting
@@ -130,6 +161,9 @@ The better approach is:
 
 - `ActivityWatch not reachable`
   Check whether `aw-server` can start and bind to `localhost:5600`.
+
+- macOS says the app cannot be opened
+  This beta DMG is unsigned and not notarized. Open `Canopy.app` from Finder and follow the extra macOS trust prompt.
 
 - `OPENAI_API_KEY missing or blank`
   The planner still works, but classification and coaching will stay off until `.env` is set.

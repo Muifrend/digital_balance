@@ -6,6 +6,7 @@ export type NavSection = 'calendar' | 'projects' | 'analytics' | 'friends' | 'se
 type TopNavProps = {
   active: NavSection
   onChange: (section: NavSection) => void
+  onOpenDemo: () => void
 }
 
 const tabBase: React.CSSProperties = {
@@ -66,7 +67,7 @@ function GearIcon(): JSX.Element {
   )
 }
 
-export default function TopNav({ active, onChange }: TopNavProps): JSX.Element {
+export default function TopNav({ active, onChange, onOpenDemo }: TopNavProps): JSX.Element {
   const sections: Array<{ key: NavSection; label: string }> = [
     { key: 'calendar', label: 'Calendar' },
     { key: 'projects', label: 'Projects' },
@@ -112,6 +113,15 @@ export default function TopNav({ active, onChange }: TopNavProps): JSX.Element {
       </div>
 
       <div style={{ flex: 1 }} />
+
+      <button
+        type="button"
+        onClick={onOpenDemo}
+        data-demo-anchor="top-nav-demo"
+        style={tabBase}
+      >
+        Demo
+      </button>
 
       <button
         type="button"

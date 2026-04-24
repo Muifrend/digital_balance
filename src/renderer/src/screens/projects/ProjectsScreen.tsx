@@ -135,6 +135,7 @@ export default function ProjectsScreen(): JSX.Element {
         <button
           type="button"
           onClick={() => setEditor({ kind: 'create' })}
+          data-demo-anchor="projects-new-project"
           style={{
             padding: '8px 14px',
             borderRadius: 'var(--r-md)',

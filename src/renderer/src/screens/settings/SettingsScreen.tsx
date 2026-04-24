@@ -156,6 +156,7 @@ export default function SettingsScreen(): JSX.Element {
 
       <div style={{ flex: 1, overflowY: 'auto', padding: '24px' }}>
         <section
+          data-demo-anchor="settings-api-key"
           style={{
             maxWidth: 560,
             background: 'var(--surface)',

@@ -355,6 +355,11 @@ export function createActivityWatchService(): ActivityWatchService {
   }
 
   async function startBundledActivityWatch(): Promise<void> {
+    if (await isActivityWatchServerHealthy()) {
+      console.log('[activitywatch] Server already healthy, skipping bundled startup.')
+      return
+    }
+
     const activityWatchRoot = resolveActivityWatchRoot()
 
     await ensureActivityWatchServer(activityWatchRoot)
