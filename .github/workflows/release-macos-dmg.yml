@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   build-macos-dmg:
-    runs-on: macos-latest
+    runs-on: macos-13
     env:
       DEFAULT_ACTIVITYWATCH_VERSION: v0.13.2
       REPO_ACTIVITYWATCH_VERSION: ${{ vars.ACTIVITYWATCH_VERSION }}

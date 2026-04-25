@@ -23,6 +23,7 @@ import { prepareStatements, resetPreparedState } from './statements'
 
 export type DatabaseService = {
   initialize: () => void
+  getInitializationError: () => string | null
   persistMinutePayload: (payload: MinutePersistencePayload, logDatabase: boolean) => void
   getPreviousAfkStreak: (minuteTimestamp: string) => number
   rebuildMinutesProjection: (options?: RebuildMinutesProjectionOptions) => void
@@ -94,6 +95,7 @@ export function createDatabaseService(options: {
 }): DatabaseService {
   const context = createDatabaseContext()
   const calendarChangeListeners = new Set<(date: string) => void>()
+  let lastInitializationError: string | null = null
   let classificationQueue: ClassificationQueue | null = null
   let persistence: DatabasePersistence | null = null
   let projectionRebuild: ProjectionRebuild | null = null
@@ -107,12 +109,21 @@ export function createDatabaseService(options: {
     }
   }
 
+  function throwDatabaseNotInitialized(): never {
+    if (lastInitializationError) {
+      throw new Error(`Database not initialized: ${lastInitializationError}`)
+    }
+
+    throw new Error('Database not initialized')
+  }
+
   function initialize(): void {
     if (context.database) {
       return
     }
 
     try {
+      lastInitializationError = null
       context.database = new Database(options.databasePath)
       context.database.pragma('journal_mode = WAL')
       runDatabaseMigrations(context.database)
@@ -130,6 +141,7 @@ export function createDatabaseService(options: {
       analytics = createAnalyticsDatabase(context)
     } catch (error) {
       console.error('[db] Failed to initialize database:', error)
+      lastInitializationError = error instanceof Error ? error.message : String(error)
       classificationQueue?.stop()
       resetPreparedState(context)
       context.openAiApiKey = null
@@ -145,6 +157,10 @@ export function createDatabaseService(options: {
 
   function persistMinutePayload(payload: MinutePersistencePayload, logDatabase: boolean): void {
     persistence?.persistMinutePayload(payload, logDatabase)
+  }
+
+  function getInitializationError(): string | null {
+    return lastInitializationError
   }
 
   function getPreviousAfkStreak(minuteTimestamp: string): number {
@@ -169,7 +185,7 @@ export function createDatabaseService(options: {
     color: string | null
   }): ProjectRecord {
     if (!planning) {
-      throw new Error('Database not initialized')
+      throwDatabaseNotInitialized()
     }
 
     return planning.createProject(input)
@@ -182,7 +198,7 @@ export function createDatabaseService(options: {
     color: string | null
   }): ProjectRecord {
     if (!planning) {
-      throw new Error('Database not initialized')
+      throwDatabaseNotInitialized()
     }
 
     return planning.updateProject(input)
@@ -190,7 +206,7 @@ export function createDatabaseService(options: {
 
   function archiveProject(input: { id: string; archived: boolean }): void {
     if (!planning) {
-      throw new Error('Database not initialized')
+      throwDatabaseNotInitialized()
     }
 
     planning.archiveProject(input)
@@ -205,7 +221,7 @@ export function createDatabaseService(options: {
     endAt: string
   }): PlannedBlock {
     if (!planning) {
-      throw new Error('Database not initialized')
+      throwDatabaseNotInitialized()
     }
 
     return planning.createScheduleBlock(input)
@@ -221,7 +237,7 @@ export function createDatabaseService(options: {
     endAt: string
   }): PlannedBlock {
     if (!planning) {
-      throw new Error('Database not initialized')
+      throwDatabaseNotInitialized()
     }
 
     return planning.updateScheduleBlock(input)
@@ -229,7 +245,7 @@ export function createDatabaseService(options: {
 
   function deleteScheduleBlock(input: { id: string }): void {
     if (!planning) {
-      throw new Error('Database not initialized')
+      throwDatabaseNotInitialized()
     }
 
     planning.deleteScheduleBlock(input)
@@ -247,7 +263,7 @@ export function createDatabaseService(options: {
     redirectedBlock: PlannedBlock
   } {
     if (!planning) {
-      throw new Error('Database not initialized')
+      throwDatabaseNotInitialized()
     }
 
     return planning.redirectScheduleBlock(input)
@@ -258,7 +274,7 @@ export function createDatabaseService(options: {
     aggregationMinutes: AggregationWindowMinutes
   }): DayViewData {
     if (!dayView) {
-      throw new Error('Database not initialized')
+      throwDatabaseNotInitialized()
     }
 
     return dayView.getDayViewData(input)
@@ -270,7 +286,7 @@ export function createDatabaseService(options: {
     aggregationMinutes: AggregationWindowMinutes
   }): ActivityEvidence {
     if (!dayView) {
-      throw new Error('Database not initialized')
+      throwDatabaseNotInitialized()
     }
 
     return dayView.getActivityEvidence(input)
@@ -278,7 +294,7 @@ export function createDatabaseService(options: {
 
   function confirmOnTask(input: { startAt: string; endAt: string }): void {
     if (!planning) {
-      throw new Error('Database not initialized')
+      throwDatabaseNotInitialized()
     }
 
     planning.confirmOnTask(input)
@@ -297,7 +313,7 @@ export function createDatabaseService(options: {
 
   function getAnalyticsDay(input: { date: string }): DaySummary {
     if (!analytics) {
-      throw new Error('Database not initialized')
+      throwDatabaseNotInitialized()
     }
 
     return analytics.getDaySummary(input)
@@ -305,7 +321,7 @@ export function createDatabaseService(options: {
 
   function getAnalyticsWeek(input: { endDate: string }): WeekSummary {
     if (!analytics) {
-      throw new Error('Database not initialized')
+      throwDatabaseNotInitialized()
     }
 
     return analytics.getWeekSummary(input)
@@ -341,6 +357,7 @@ export function createDatabaseService(options: {
       resetPreparedState(context)
       context.openAiApiKey = null
       context.database = null
+      lastInitializationError = null
       classificationQueue = null
       persistence = null
       projectionRebuild = null
@@ -352,6 +369,7 @@ export function createDatabaseService(options: {
 
   return {
     initialize,
+    getInitializationError,
     persistMinutePayload,
     getPreviousAfkStreak,
     rebuildMinutesProjection,

@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain } from 'electron'
+import { app, shell, BrowserWindow, dialog, ipcMain } from 'electron'
 import { existsSync } from 'fs'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
@@ -224,6 +224,18 @@ app.whenReady().then(() => {
     projectRoot: resolveProjectRoot()
   })
   databaseService.initialize()
+  const databaseInitializationError = databaseService.getInitializationError()
+  if (databaseInitializationError) {
+    dialog.showErrorBox(
+      'Canopy failed to initialize its local database',
+      `${databaseInitializationError}\n\nCanopy will open with limited functionality so you can inspect Settings or retry with a new build.`
+    )
+    createWindow()
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    })
+    return
+  }
 
   const storedSettings = settingsStore.read()
   if (storedSettings.openAiApiKey) {

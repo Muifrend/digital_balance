@@ -18,7 +18,7 @@
     "postinstall": "electron-builder install-app-deps",
     "build:unpack": "npm run build && electron-builder --dir",
     "build:win": "npm run build && electron-builder --win",
-    "build:mac": "MAC_BUILD_ARCH=\"${MAC_BUILD_ARCH:-x64}\"; export MAC_BUILD_ARCH; npm run prepare:activitywatch:mac && electron-vite build && electron-builder --mac --$MAC_BUILD_ARCH --publish never",
+    "build:mac": "MAC_BUILD_ARCH=\"${MAC_BUILD_ARCH:-x64}\"; export MAC_BUILD_ARCH; npm run prepare:activitywatch:mac && electron-builder install-app-deps --platform=darwin --arch=$MAC_BUILD_ARCH && electron-vite build && electron-builder --mac --$MAC_BUILD_ARCH --publish never",
     "build:linux": "electron-vite build && electron-builder --linux"
   },
   "dependencies": {
