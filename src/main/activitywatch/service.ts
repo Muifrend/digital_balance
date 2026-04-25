@@ -12,6 +12,7 @@ const EVENT_FETCH_LIMIT = 100
 const AW_SERVER_NAME = 'aw-server'
 const AW_WATCHER_WINDOW_NAME = 'aw-watcher-window'
 const AW_WATCHER_AFK_NAME = 'aw-watcher-afk'
+const MACOS_WINDOW_WATCHER_ARGS = ['--strategy', 'jxa']
 
 type ActivityWatchBucketsResponse = Record<string, unknown>
 
@@ -255,12 +256,13 @@ export function createActivityWatchService(): ActivityWatchService {
     label: string,
     binaryPath: string,
     baseDir: string,
+    args: string[],
     setProcessRef: (childProcess: ChildProcessWithoutNullStreams | null) => void
   ): void {
     const binaryDir = dirname(binaryPath)
     const childProcess = attachProcessLogging(
       label,
-      spawn(binaryPath, [], {
+      spawn(binaryPath, args, {
         cwd: binaryDir,
         env: buildActivityWatchEnv(baseDir, binaryDir),
         stdio: 'pipe',
@@ -309,7 +311,7 @@ export function createActivityWatchService(): ActivityWatchService {
       return
     }
 
-    launchManagedProcess('aw-server', binaryPath, activityWatchRoot, (childProcess) => {
+    launchManagedProcess('aw-server', binaryPath, activityWatchRoot, [], (childProcess) => {
       awServerProcess = childProcess
     })
 
@@ -344,7 +346,12 @@ export function createActivityWatchService(): ActivityWatchService {
       return
     }
 
-    launchManagedProcess(watcherName, binaryPath, activityWatchRoot, (childProcess) => {
+    const watcherArgs =
+      process.platform === 'darwin' && watcherName === AW_WATCHER_WINDOW_NAME
+        ? MACOS_WINDOW_WATCHER_ARGS
+        : []
+
+    launchManagedProcess(watcherName, binaryPath, activityWatchRoot, watcherArgs, (childProcess) => {
       if (watcherName === AW_WATCHER_WINDOW_NAME) {
         awWatcherWindowProcess = childProcess
         return
@@ -355,14 +362,27 @@ export function createActivityWatchService(): ActivityWatchService {
   }
 
   async function startBundledActivityWatch(): Promise<void> {
-    if (await isActivityWatchServerHealthy()) {
-      console.log('[activitywatch] Server already healthy, skipping bundled startup.')
-      return
+    const serverAlreadyHealthy = await isActivityWatchServerHealthy()
+    let activityWatchRoot: string
+
+    try {
+      activityWatchRoot = resolveActivityWatchRoot()
+    } catch (error) {
+      if (serverAlreadyHealthy) {
+        console.log(
+          '[activitywatch] Server already healthy, reusing external ActivityWatch services.'
+        )
+        return
+      }
+
+      throw error
     }
 
-    const activityWatchRoot = resolveActivityWatchRoot()
-
-    await ensureActivityWatchServer(activityWatchRoot)
+    if (serverAlreadyHealthy) {
+      console.log('[activitywatch] Server already healthy, ensuring bundled watchers.')
+    } else {
+      await ensureActivityWatchServer(activityWatchRoot)
+    }
 
     if (!(await isActivityWatchServerHealthy())) {
       console.warn('[activitywatch] Server unavailable after startup attempt.')
