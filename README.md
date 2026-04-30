@@ -2,6 +2,11 @@
 
 Canopy is a local-first desktop app for planning your day against what your computer actually did. It pairs a planner with ActivityWatch-backed activity capture, stores data locally in SQLite, and can use OpenAI to classify whether recent activity matched the block you intended to work on.
 
+## Walkthrough and Process
+
+- [Video walkthrough](https://drive.google.com/file/d/1xdL_7SoyT9ubVifsJFeiLqnK9TvB9gNy/view?usp=sharing)
+- [Process writeup](docs/PROCESS.md)
+
 ## What It Does
 
 - Shows planned blocks and captured activity in a single-day view
@@ -106,4 +111,3 @@ curl -sS http://localhost:5600/api/0/buckets
 
 - `OPENAI_API_KEY missing or blank`
   Classification is disabled, but the planner still works.
-
